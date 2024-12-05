@@ -8,16 +8,13 @@ import requests
 
 # Welcome message with progress bar
 def show_welcome_message():
-    # Display a loading bar
     for i in tqdm(range(100), desc="Loading"):
         time.sleep(0.05)
 
-    # Clear the screen and show the welcome banner
     os.system('clear' if os.name == 'posix' else 'cls')
     banner = pyfiglet.figlet_format("Welcome to Tools")
     print(colored(banner, "cyan"))
 
-    # Wait for 5 seconds, then clear the screen
     time.sleep(5)
     os.system('clear' if os.name == 'posix' else 'cls')
 
@@ -34,7 +31,10 @@ def scan_sql_injection(url):
         try:
             response = requests.get(vulnerable_url, timeout=5).text
             if "error" in response.lower() or "sql" in response.lower():
-                return True, payload
+                # Confirm the vulnerability
+                confirm_response = requests.get(vulnerable_url, timeout=5).text
+                if "error" in confirm_response.lower() or "sql" in confirm_response.lower():
+                    return True, vulnerable_url
         except Exception:
             continue
     return False, None
@@ -47,7 +47,10 @@ def scan_xss(url):
         try:
             response = requests.get(vulnerable_url, timeout=5).text
             if payload in response:
-                return True, payload
+                # Confirm the vulnerability
+                confirm_response = requests.get(vulnerable_url, timeout=5).text
+                if payload in confirm_response:
+                    return True, vulnerable_url
         except Exception:
             continue
     return False, None
@@ -60,7 +63,10 @@ def scan_idor(url):
         try:
             response = requests.get(test_url, timeout=5).text
             if "unauthorized" not in response.lower() and "not found" not in response.lower():
-                return True, path
+                # Confirm the vulnerability
+                confirm_response = requests.get(test_url, timeout=5).text
+                if "unauthorized" not in confirm_response.lower() and "not found" not in confirm_response.lower():
+                    return True, test_url
         except Exception:
             continue
     return False, None
@@ -73,17 +79,18 @@ def scan_bypass_admin(url):
         try:
             response = requests.get(test_url, timeout=5).text
             if "welcome admin" in response.lower() or "admin panel" in response.lower():
-                return True, path
+                # Confirm the vulnerability
+                confirm_response = requests.get(test_url, timeout=5).text
+                if "welcome admin" in confirm_response.lower() or "admin panel" in confirm_response.lower():
+                    return True, test_url
         except Exception:
             continue
     return False, None
 
 # Main program
 def main():
-    # Display welcome message with progress bar
+    # Display welcome message and tool name
     show_welcome_message()
-
-    # Display tool name
     show_tool_name()
 
     # Request the file name
@@ -111,27 +118,27 @@ def main():
         found = False
 
         # SQL Injection
-        sql_injection, sql_payload = scan_sql_injection(url)
+        sql_injection, sql_path = scan_sql_injection(url)
         if sql_injection:
-            results_table.add_row([url, "SQL Injection", sql_payload])
+            results_table.add_row([colored(url, "green"), "SQL Injection", sql_path])
             found = True
 
         # XSS
-        xss, xss_payload = scan_xss(url)
+        xss, xss_path = scan_xss(url)
         if xss:
-            results_table.add_row([url, "XSS", xss_payload])
+            results_table.add_row([colored(url, "green"), "XSS", xss_path])
             found = True
 
         # IDOR
         idor, idor_path = scan_idor(url)
         if idor:
-            results_table.add_row([url, "IDOR", idor_path])
+            results_table.add_row([colored(url, "green"), "IDOR", idor_path])
             found = True
 
         # Admin Bypass
         bypass, bypass_path = scan_bypass_admin(url)
         if bypass:
-            results_table.add_row([url, "Admin Bypass", bypass_path])
+            results_table.add_row([colored(url, "green"), "Admin Bypass", bypass_path])
             found = True
 
         if not found:
