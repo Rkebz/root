@@ -31,7 +31,6 @@ def scan_sql_injection(url):
         try:
             response = requests.get(vulnerable_url, timeout=5).text
             if "error" in response.lower() or "sql" in response.lower():
-                # Confirm the vulnerability
                 confirm_response = requests.get(vulnerable_url, timeout=5).text
                 if "error" in confirm_response.lower() or "sql" in confirm_response.lower():
                     return True, vulnerable_url
@@ -47,7 +46,6 @@ def scan_xss(url):
         try:
             response = requests.get(vulnerable_url, timeout=5).text
             if payload in response:
-                # Confirm the vulnerability
                 confirm_response = requests.get(vulnerable_url, timeout=5).text
                 if payload in confirm_response:
                     return True, vulnerable_url
@@ -63,7 +61,6 @@ def scan_idor(url):
         try:
             response = requests.get(test_url, timeout=5).text
             if "unauthorized" not in response.lower() and "not found" not in response.lower():
-                # Confirm the vulnerability
                 confirm_response = requests.get(test_url, timeout=5).text
                 if "unauthorized" not in confirm_response.lower() and "not found" not in confirm_response.lower():
                     return True, test_url
@@ -79,7 +76,6 @@ def scan_bypass_admin(url):
         try:
             response = requests.get(test_url, timeout=5).text
             if "welcome admin" in response.lower() or "admin panel" in response.lower():
-                # Confirm the vulnerability
                 confirm_response = requests.get(test_url, timeout=5).text
                 if "welcome admin" in confirm_response.lower() or "admin panel" in confirm_response.lower():
                     return True, test_url
@@ -109,7 +105,7 @@ def main():
 
     # Initialize results table
     results_table = PrettyTable()
-    results_table.field_names = ["URL", "Vulnerability", "Payload/Path"]
+    results_table.field_names = ["URL", "Vulnerability", "Full Path"]
     results_table.align = "l"
 
     # Scan each URL
@@ -121,28 +117,32 @@ def main():
         sql_injection, sql_path = scan_sql_injection(url)
         if sql_injection:
             results_table.add_row([colored(url, "green"), "SQL Injection", sql_path])
+            print(colored(f"[+] Found SQL Injection: {sql_path}", "green"))
             found = True
 
         # XSS
         xss, xss_path = scan_xss(url)
         if xss:
             results_table.add_row([colored(url, "green"), "XSS", xss_path])
+            print(colored(f"[+] Found XSS: {xss_path}", "green"))
             found = True
 
         # IDOR
         idor, idor_path = scan_idor(url)
         if idor:
             results_table.add_row([colored(url, "green"), "IDOR", idor_path])
+            print(colored(f"[+] Found IDOR: {idor_path}", "green"))
             found = True
 
         # Admin Bypass
         bypass, bypass_path = scan_bypass_admin(url)
         if bypass:
             results_table.add_row([colored(url, "green"), "Admin Bypass", bypass_path])
+            print(colored(f"[+] Found Admin Bypass: {bypass_path}", "green"))
             found = True
 
         if not found:
-            print(colored(f"No vulnerabilities found for {url}", "red"))
+            print(colored(f"[-] No vulnerabilities found for {url}", "red"))
 
     # Display results
     print("\nScan Results:")
