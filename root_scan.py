@@ -4,20 +4,28 @@ import requests
 from tqdm import tqdm
 from termcolor import colored
 from prettytable import PrettyTable
+from colorama import init
+import pyfiglet
 from urllib.parse import urljoin, urlparse, urlencode, parse_qs, urlunparse
 
-# Welcome message with progress bar
+# Initialize colorama
+init(autoreset=True)
+
+# Display welcome message using pyfiglet for large text
 def show_welcome_message():
-    for i in tqdm(range(100), desc="Loading"):
-        time.sleep(0.05)
+    os.system('clear' if os.name == 'posix' else 'cls')  # Clear terminal screen
 
+    # Create the banner with pyfiglet
+    welcome_message = pyfiglet.figlet_format("Tools Mr.root", font="slant")
+    print(colored(welcome_message, "cyan"))
+
+    # Wait for 5 seconds before starting
+    time.sleep(5)
+
+    # Clear the screen
     os.system('clear' if os.name == 'posix' else 'cls')
-    print(colored("Welcome to Tools", "cyan", attrs=["bold"]))
 
-    time.sleep(2)
-    os.system('clear' if os.name == 'posix' else 'cls')
-
-# Load data from a file
+# Load data from file
 def load_file(filename):
     if not os.path.exists(filename):
         print(colored(f"File '{filename}' not found!", "red"))
@@ -80,7 +88,7 @@ def main():
 
     # Load paths and payloads
     paths_sql = load_file("paths_sql.txt")
-    paths_xss = load_file("paths_xss.txt")
+    paths_xss = load_file("paths_xxss.txt")
     sql_payloads = load_file("payloads_sql.txt")
     xss_payloads = load_file("payloads_xss.txt")
 
