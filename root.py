@@ -41,21 +41,16 @@ def test_xss(url):
     xss_results = []
     for payload in xss_payloads:
         if "?" in url:
-            base_url, params = url.split("?", 1)
-            params = params.split("&")
-            for param in params:
-                key, value = param.split("=")
-                modified_params = {key: (payload if key == key else value) for key, value in [p.split("=") for p in params]}
-                try:
-                    response = requests.get(base_url, params=modified_params, timeout=10)
-                    if payload in response.text:
-                        xss_results.append({
-                            "url": response.url,
-                            "payload": payload,
-                            "parameter": key
-                        })
-                except requests.exceptions.RequestException as e:
-                    print(colored(f"[XSS TEST] Error testing {url}: {e}", "red"))
+            try:
+                # Test by injecting payload in the URL query parameters
+                response = requests.get(url + payload, timeout=10)
+                if payload in response.text:
+                    xss_results.append({
+                        "url": url,
+                        "payload": payload
+                    })
+            except requests.exceptions.RequestException as e:
+                print(colored(f"[XSS TEST] Error testing {url}: {e}", "red"))
     return xss_results
 
 # Test SQL Injection vulnerabilities
@@ -63,35 +58,19 @@ def test_sql(url):
     sql_results = []
     for payload in sql_payloads:
         if "?" in url:
-            base_url, params = url.split("?", 1)
-            params = params.split("&")
-            for param in params:
-                key, value = param.split("=")
-                modified_params = {key: (payload if key == key else value) for key, value in [p.split("=") for p in params]}
-                try:
-                    response = requests.get(base_url, params=modified_params, timeout=10)
-                    if "syntax error" in response.text.lower() or "mysql" in response.text.lower():
-                        exploitable = verify_exploitability(base_url, modified_params)
-                        sql_results.append({
-                            "url": response.url,
-                            "payload": payload,
-                            "exploitable": exploitable
-                        })
-                except requests.exceptions.RequestException as e:
-                    print(colored(f"[SQL TEST] Error testing {url}: {e}", "red"))
+            try:
+                # Test by injecting payload in the URL query parameters
+                response = requests.get(url + payload, timeout=10)
+                if "syntax error" in response.text.lower() or "mysql" in response.text.lower():
+                    sql_results.append({
+                        "url": url,
+                        "payload": payload
+                    })
+            except requests.exceptions.RequestException as e:
+                print(colored(f"[SQL TEST] Error testing {url}: {e}", "red"))
     return sql_results
 
-# Verify exploitability for SQL Injection
-def verify_exploitability(base_url, params):
-    try:
-        response = requests.get(base_url, params=params, timeout=10)
-        if "syntax" in response.text.lower() or "mysql" in response.text.lower():
-            return True
-    except requests.exceptions.RequestException:
-        pass
-    return False
-
-# Discover links within a website
+# Discover all links within a website
 def discover_links(url):
     links = []
     try:
@@ -116,32 +95,31 @@ def scan_websites(file_name):
     for website in websites:
         print(colored(f"\n[+] Scanning: {website}", "cyan"))
 
-        # Discover additional links on the website
+        # Discover all links on the website
         links = discover_links(website)
         all_urls = [website] + links
 
         # Prepare tables for results
         xss_table = PrettyTable()
-        xss_table.field_names = ["URL", "Parameter", "Payload"]
+        xss_table.field_names = ["URL", "Payload"]
 
         sql_table = PrettyTable()
-        sql_table.field_names = ["URL", "Payload", "Exploitable"]
+        sql_table.field_names = ["URL", "Payload"]
 
         for url in all_urls:
             print(colored(f"Scanning URL: {url}", "light_blue"))
 
-            # Test XSS vulnerabilities
+            # Test for XSS vulnerabilities
             xss_results = test_xss(url)
             if xss_results:
                 for result in xss_results:
-                    xss_table.add_row([result['url'], result['parameter'], result['payload']])
+                    xss_table.add_row([result['url'], result['payload']])
 
-            # Test SQL Injection vulnerabilities
+            # Test for SQL Injection vulnerabilities
             sql_results = test_sql(url)
             if sql_results:
                 for result in sql_results:
-                    exploitable_status = "Yes" if result["exploitable"] else "No"
-                    sql_table.add_row([result['url'], result['payload'], exploitable_status])
+                    sql_table.add_row([result['url'], result['payload']])
 
         # Display results
         if xss_table.rowcount > 0:
