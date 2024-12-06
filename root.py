@@ -35,41 +35,78 @@ def load_websites(file_name):
     with open(file_name, "r") as file:
         return [line.strip() for line in file if line.strip()]
 
-# Function to check XSS vulnerabilities
-def check_xss(url):
+# Discover all forms on a webpage
+def discover_forms(url):
+    try:
+        response = requests.get(url, timeout=10)
+        soup = BeautifulSoup(response.text, "html.parser")
+        return soup.find_all("form")
+    except requests.exceptions.RequestException as e:
+        print(colored(f"[FORMS] Error discovering forms on {url}: {e}", "red"))
+        return []
+
+# Submit forms with payloads for testing
+def test_form_xss_sql(url, forms, payloads):
     vulnerabilities = []
-    for payload in xss_payloads:
-        try:
-            test_url = f"{url}?q={payload}"
-            response = requests.get(test_url, timeout=10)
-            if payload in response.text:
-                vulnerabilities.append({
-                    "url": test_url,
-                    "payload": payload,
-                    "path": f"/?q={payload}"  # Adding the path
-                })
-        except requests.exceptions.RequestException as e:
-            print(colored(f"[XSS] Error testing {url}: {e}", "red"))
+    for form in forms:
+        action = form.get("action")
+        method = form.get("method", "get").lower()
+        inputs = form.find_all("input")
+        
+        # Prepare data for the form
+        form_data = {}
+        for input_tag in inputs:
+            input_name = input_tag.get("name")
+            if input_name:
+                form_data[input_name] = payloads[0]  # Use first payload for now
+        
+        # Construct the form URL
+        form_url = url if action.startswith("/") else url.rstrip("/") + "/" + action
+        
+        # Submit the form with payloads
+        for payload in payloads:
+            for key in form_data.keys():
+                form_data[key] = payload
+            try:
+                if method == "post":
+                    response = requests.post(form_url, data=form_data, timeout=10)
+                else:
+                    response = requests.get(form_url, params=form_data, timeout=10)
+                
+                if payload in response.text:
+                    vulnerabilities.append({
+                        "url": form_url,
+                        "method": method.upper(),
+                        "payload": payload,
+                        "parameters": form_data
+                    })
+            except requests.exceptions.RequestException as e:
+                print(colored(f"[FORM TEST] Error testing form on {form_url}: {e}", "red"))
     return vulnerabilities
 
-# Function to check SQL Injection vulnerabilities
-def check_sql(url):
+# Test XSS and SQL Injection for query parameters in URLs
+def test_url_parameters(url, payloads):
     vulnerabilities = []
-    for payload in sql_payloads:
-        try:
-            test_url = f"{url}?q={payload}"
-            response = requests.get(test_url, timeout=10)
-            if "syntax" in response.text.lower() or "error" in response.text.lower():
-                vulnerabilities.append({
-                    "url": test_url,
-                    "payload": payload,
-                    "path": f"/?q={payload}"  # Adding the path
-                })
-        except requests.exceptions.RequestException as e:
-            print(colored(f"[SQL] Error testing {url}: {e}", "red"))
+    if "?" in url:
+        base_url, params = url.split("?", 1)
+        params = params.split("&")
+        for payload in payloads:
+            for param in params:
+                key, value = param.split("=")
+                modified_params = {key: (payload if key else value) for key, value in [p.split("=") for p in params]}
+                try:
+                    response = requests.get(base_url, params=modified_params, timeout=10)
+                    if payload in response.text:
+                        vulnerabilities.append({
+                            "url": response.url,
+                            "payload": payload,
+                            "parameters": modified_params
+                        })
+                except requests.exceptions.RequestException as e:
+                    print(colored(f"[URL TEST] Error testing parameters on {url}: {e}", "red"))
     return vulnerabilities
 
-# Enhanced function to discover links within a website (Advanced feature)
+# Discover links within a website
 def discover_links(url):
     links = []
     try:
@@ -102,15 +139,18 @@ def scan_websites(file_name):
         results[website] = {"xss": [], "sql": []}
 
         for url in all_urls:
-            # Check for XSS vulnerabilities
-            xss_vulns = check_xss(url)
-            if xss_vulns:
-                results[website]["xss"].extend(xss_vulns)
+            # Discover and test forms
+            forms = discover_forms(url)
+            xss_vulns_forms = test_form_xss_sql(url, forms, xss_payloads)
+            sql_vulns_forms = test_form_xss_sql(url, forms, sql_payloads)
 
-            # Check for SQL Injection vulnerabilities
-            sql_vulns = check_sql(url)
-            if sql_vulns:
-                results[website]["sql"].extend(sql_vulns)
+            # Test URL parameters
+            xss_vulns_url = test_url_parameters(url, xss_payloads)
+            sql_vulns_url = test_url_parameters(url, sql_payloads)
+
+            # Combine all vulnerabilities
+            results[website]["xss"].extend(xss_vulns_forms + xss_vulns_url)
+            results[website]["sql"].extend(sql_vulns_forms + sql_vulns_url)
 
     # Display results
     for website, vulnerabilities in results.items():
@@ -120,7 +160,7 @@ def scan_websites(file_name):
         if vulnerabilities["xss"]:
             print(colored("XSS Vulnerabilities Found:", "yellow"))
             for vuln in vulnerabilities["xss"]:
-                print(colored(f"Payload: {vuln['payload']} | URL: {vuln['url']} | Path: {vuln['path']}", "green"))
+                print(colored(f"Payload: {vuln['payload']} | URL: {vuln['url']} | Parameters: {vuln['parameters']}", "green"))
         else:
             print(colored("No XSS vulnerabilities found.", "red"))
 
@@ -128,7 +168,7 @@ def scan_websites(file_name):
         if vulnerabilities["sql"]:
             print(colored("SQL Injection Vulnerabilities Found:", "yellow"))
             for vuln in vulnerabilities["sql"]:
-                print(colored(f"Payload: {vuln['payload']} | URL: {vuln['url']} | Path: {vuln['path']}", "green"))
+                print(colored(f"Payload: {vuln['payload']} | URL: {vuln['url']} | Parameters: {vuln['parameters']}", "green"))
         else:
             print(colored("No SQL Injection vulnerabilities found.", "red"))
 
