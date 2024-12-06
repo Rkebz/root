@@ -6,9 +6,13 @@ from colorama import Fore, init
 # Initialize colorama
 init(autoreset=True)
 
-# Print the banner with pyfiglet
-ascii_banner = pyfiglet.figlet_format("Mr.root Tools")
-print(Fore.CYAN + ascii_banner)
+# Function to check if the script is running as root
+def check_root():
+    if os.geteuid() != 0:
+        print(Fore.RED + "[*] This script requires root privileges. Please run it as root (sudo).")
+        exit(1)
+    else:
+        print(Fore.GREEN + "[*] Running with root privileges...")
 
 # Function to check for SQL Injection using SQLMap
 def check_sql_injection(url):
@@ -54,6 +58,8 @@ def check_idor(url):
 
 # Main function to read the URLs from the file and scan them
 def main():
+    check_root()  # Check if the script is running as root
+
     file_path = input(Fore.CYAN + "Enter the path to the list file (list.txt): ").strip()
     if not os.path.exists(file_path):
         print(Fore.RED + "The file does not exist!")
