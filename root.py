@@ -40,9 +40,14 @@ def check_xss(url):
     vulnerabilities = []
     for payload in xss_payloads:
         try:
-            response = requests.get(f"{url}?q={payload}", timeout=10)
+            test_url = f"{url}?q={payload}"
+            response = requests.get(test_url, timeout=10)
             if payload in response.text:
-                vulnerabilities.append({"url": url, "payload": payload})
+                vulnerabilities.append({
+                    "url": test_url,
+                    "payload": payload,
+                    "path": f"/?q={payload}"  # Adding the path
+                })
         except requests.exceptions.RequestException as e:
             print(colored(f"[XSS] Error testing {url}: {e}", "red"))
     return vulnerabilities
@@ -52,9 +57,14 @@ def check_sql(url):
     vulnerabilities = []
     for payload in sql_payloads:
         try:
-            response = requests.get(f"{url}?q={payload}", timeout=10)
+            test_url = f"{url}?q={payload}"
+            response = requests.get(test_url, timeout=10)
             if "syntax" in response.text.lower() or "error" in response.text.lower():
-                vulnerabilities.append({"url": url, "payload": payload})
+                vulnerabilities.append({
+                    "url": test_url,
+                    "payload": payload,
+                    "path": f"/?q={payload}"  # Adding the path
+                })
         except requests.exceptions.RequestException as e:
             print(colored(f"[SQL] Error testing {url}: {e}", "red"))
     return vulnerabilities
@@ -110,7 +120,7 @@ def scan_websites(file_name):
         if vulnerabilities["xss"]:
             print(colored("XSS Vulnerabilities Found:", "yellow"))
             for vuln in vulnerabilities["xss"]:
-                print(colored(f"Payload: {vuln['payload']} | URL: {vuln['url']}", "green"))
+                print(colored(f"Payload: {vuln['payload']} | URL: {vuln['url']} | Path: {vuln['path']}", "green"))
         else:
             print(colored("No XSS vulnerabilities found.", "red"))
 
@@ -118,7 +128,7 @@ def scan_websites(file_name):
         if vulnerabilities["sql"]:
             print(colored("SQL Injection Vulnerabilities Found:", "yellow"))
             for vuln in vulnerabilities["sql"]:
-                print(colored(f"Payload: {vuln['payload']} | URL: {vuln['url']}", "green"))
+                print(colored(f"Payload: {vuln['payload']} | URL: {vuln['url']} | Path: {vuln['path']}", "green"))
         else:
             print(colored("No SQL Injection vulnerabilities found.", "red"))
 
