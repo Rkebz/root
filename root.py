@@ -3,6 +3,7 @@ from bs4 import BeautifulSoup
 import pyfiglet
 from termcolor import colored
 import os
+from prettytable import PrettyTable
 
 # ASCII banner using pyfiglet
 ascii_banner = pyfiglet.figlet_format("Mr.root Scanner")
@@ -35,7 +36,7 @@ def load_websites(file_name):
     with open(file_name, "r") as file:
         return [line.strip() for line in file if line.strip()]
 
-# Test XSS injection points
+# Test XSS vulnerabilities
 def test_xss(url):
     xss_results = []
     for payload in xss_payloads:
@@ -119,27 +120,41 @@ def scan_websites(file_name):
         links = discover_links(website)
         all_urls = [website] + links
 
+        # Prepare tables for results
+        xss_table = PrettyTable()
+        xss_table.field_names = ["URL", "Parameter", "Payload"]
+
+        sql_table = PrettyTable()
+        sql_table.field_names = ["URL", "Payload", "Exploitable"]
+
         for url in all_urls:
             print(colored(f"Scanning URL: {url}", "light_blue"))
 
             # Test XSS vulnerabilities
             xss_results = test_xss(url)
             if xss_results:
-                print(colored("[XSS Found!]", "yellow"))
                 for result in xss_results:
-                    print(colored(f"URL: {result['url']} | Parameter: {result['parameter']} | Payload: {result['payload']}", "green"))
-            else:
-                print(colored("No XSS vulnerabilities found.", "red"))
+                    xss_table.add_row([result['url'], result['parameter'], result['payload']])
 
             # Test SQL Injection vulnerabilities
             sql_results = test_sql(url)
             if sql_results:
-                print(colored("[SQL Injection Found!]", "yellow"))
                 for result in sql_results:
-                    exploitable_status = "Exploitable" if result["exploitable"] else "Not Exploitable"
-                    print(colored(f"URL: {result['url']} | Payload: {result['payload']} | Status: {exploitable_status}", "green"))
-            else:
-                print(colored("No SQL Injection vulnerabilities found.", "red"))
+                    exploitable_status = "Yes" if result["exploitable"] else "No"
+                    sql_table.add_row([result['url'], result['payload'], exploitable_status])
+
+        # Display results
+        if xss_table.rowcount > 0:
+            print(colored("\n[XSS Vulnerabilities Found!]", "yellow"))
+            print(xss_table)
+        else:
+            print(colored("\nNo XSS vulnerabilities found.", "red"))
+
+        if sql_table.rowcount > 0:
+            print(colored("\n[SQL Injection Vulnerabilities Found!]", "yellow"))
+            print(sql_table)
+        else:
+            print(colored("\nNo SQL Injection vulnerabilities found.", "red"))
 
     print(colored("\n[+] Scan Complete!", "light_blue"))
 
