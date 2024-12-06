@@ -1,5 +1,5 @@
 import os
-import requests
+import subprocess
 import pyfiglet
 from colorama import Fore, init
 
@@ -10,49 +10,47 @@ init(autoreset=True)
 ascii_banner = pyfiglet.figlet_format("Mr.root Tools")
 print(Fore.CYAN + ascii_banner)
 
-# Function to check for IDOR vulnerability
+# Function to check for SQL Injection using SQLMap
+def check_sql_injection(url):
+    print(Fore.YELLOW + "[*] Checking for SQL Injection on the URL:", url)
+    try:
+        result = subprocess.run(['sqlmap', '-u', url, '--batch', '--risk=3', '--level=5'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if "available databases" in result.stdout:
+            print(Fore.GREEN + f"[+] SQL Injection vulnerability found in {url}")
+            print(Fore.GREEN + f"Vulnerable path: {url}")
+            print(Fore.GREEN + "Result:\n" + result.stdout)
+        else:
+            print(Fore.RED + "[-] No SQL Injection found")
+    except Exception as e:
+        print(Fore.RED + "[-] Error with SQLMap:", e)
+
+# Function to check for XSS using XSSer
+def check_xss(url):
+    print(Fore.YELLOW + "[*] Checking for XSS on the URL:", url)
+    try:
+        result = subprocess.run(['xsser', '--url', url, '--batch'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if "XSS payloads" in result.stdout:
+            print(Fore.GREEN + f"[+] XSS vulnerability found in {url}")
+            print(Fore.GREEN + f"Vulnerable path: {url}")
+            print(Fore.GREEN + "Result:\n" + result.stdout)
+        else:
+            print(Fore.RED + "[-] No XSS found")
+    except Exception as e:
+        print(Fore.RED + "[-] Error with XSSer:", e)
+
+# Function to check for Directory Traversal (IDOR) using DirBuster
 def check_idor(url):
     print(Fore.YELLOW + "[*] Checking for IDOR on the URL:", url)
     try:
-        response = requests.get(url)
-        if response.status_code == 200:
-            print(Fore.GREEN + f"[+] IDOR vulnerability found in: {url}")
+        result = subprocess.run(['dirbuster', '-u', url, '-t', '100', '-w', '/path/to/wordlist'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if "found" in result.stdout:
+            print(Fore.GREEN + f"[+] IDOR vulnerability found in {url}")
+            print(Fore.GREEN + f"Vulnerable path: {url}")
+            print(Fore.GREEN + "Result:\n" + result.stdout)
         else:
             print(Fore.RED + "[-] No IDOR found")
-    except requests.exceptions.RequestException as e:
-        print(Fore.RED + "[-] Connection failed:", e)
-
-# Function to check for SQL Injection vulnerability
-def check_sql_injection(url):
-    print(Fore.YELLOW + "[*] Checking for SQL Injection on the URL:", url)
-    payloads = ["' OR 1=1 --", "' OR 'a'='a", "' UNION SELECT null--"]
-    for payload in payloads:
-        try:
-            test_url = url + payload
-            response = requests.get(test_url)
-            if "error" in response.text or "SQL syntax" in response.text:
-                print(Fore.GREEN + f"[+] SQL Injection found in {url} with payload: {payload}")
-                print(Fore.GREEN + f"Vulnerable path: {test_url}")
-                return
-        except requests.exceptions.RequestException as e:
-            print(Fore.RED + "[-] Connection failed:", e)
-    print(Fore.RED + "[-] No SQL Injection found")
-
-# Function to check for XSS vulnerability
-def check_xss(url):
-    print(Fore.YELLOW + "[*] Checking for XSS on the URL:", url)
-    payloads = ['<script>alert("XSS")</script>', '<img src="x" onerror="alert(1)">']
-    for payload in payloads:
-        try:
-            test_url = url + payload
-            response = requests.get(test_url)
-            if payload in response.text:
-                print(Fore.GREEN + f"[+] XSS found in {url} with payload: {payload}")
-                print(Fore.GREEN + f"Vulnerable path: {test_url}")
-                return
-        except requests.exceptions.RequestException as e:
-            print(Fore.RED + "[-] Connection failed:", e)
-    print(Fore.RED + "[-] No XSS found")
+    except Exception as e:
+        print(Fore.RED + "[-] Error with DirBuster:", e)
 
 # Main function to read the URLs from the file and scan them
 def main():
@@ -63,16 +61,16 @@ def main():
 
     with open(file_path, "r") as file:
         urls = file.readlines()
-        
+
     print(Fore.CYAN + "[*] Starting the scan for all sites in the list...")
-    
+
     for url in urls:
         url = url.strip()
         if url:
             print(Fore.CYAN + f"\n[*] Scanning site: {url}")
-            check_idor(url)
             check_sql_injection(url)
             check_xss(url)
+            check_idor(url)
 
 if __name__ == "__main__":
     main()
