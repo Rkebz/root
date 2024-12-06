@@ -18,7 +18,7 @@ def test_sql_injection(url):
     results = []
     for payload in sql_injection_payloads:
         response = requests.get(url + payload)
-        if "error" in response.text or "syntax" in response.text:
+        if "error" in response.text or "syntax" in response.text or response.status_code == 500:
             results.append(("SQL Injection", url, payload, url + payload))
     return results
 
@@ -62,6 +62,7 @@ def main():
         all_results = []
         for url in urls:
             url = url.strip()
+            # Ensure the URL starts with http:// or https://
             if not url.startswith("http"):
                 url = "http://" + url
             results = scan_website(url)
