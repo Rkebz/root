@@ -1,5 +1,4 @@
 import requests
-from bs4 import BeautifulSoup
 import pyfiglet
 from termcolor import colored
 import os
@@ -40,53 +39,35 @@ def load_websites(file_name):
 def test_xss(url):
     xss_results = []
     for payload in xss_payloads:
-        if "?" in url:
-            try:
-                # Test by injecting payload in the URL query parameters
-                response = requests.get(url + payload, timeout=10)
-                if payload in response.text:
-                    xss_results.append({
-                        "url": url,
-                        "payload": payload
-                    })
-            except requests.exceptions.RequestException as e:
-                print(colored(f"[XSS TEST] Error testing {url}: {e}", "red"))
+        try:
+            # Test by injecting payload in the URL query parameters
+            response = requests.get(url + payload, timeout=10)
+            if payload in response.text:
+                xss_results.append({
+                    "url": url,
+                    "payload": payload
+                })
+        except requests.exceptions.RequestException as e:
+            print(colored(f"[XSS TEST] Error testing {url}: {e}", "red"))
     return xss_results
 
 # Test SQL Injection vulnerabilities
 def test_sql(url):
     sql_results = []
     for payload in sql_payloads:
-        if "?" in url:
-            try:
-                # Test by injecting payload in the URL query parameters
-                response = requests.get(url + payload, timeout=10)
-                if "syntax error" in response.text.lower() or "mysql" in response.text.lower():
-                    sql_results.append({
-                        "url": url,
-                        "payload": payload
-                    })
-            except requests.exceptions.RequestException as e:
-                print(colored(f"[SQL TEST] Error testing {url}: {e}", "red"))
+        try:
+            # Test by injecting payload in the URL query parameters
+            response = requests.get(url + payload, timeout=10)
+            if "syntax error" in response.text.lower() or "mysql" in response.text.lower():
+                sql_results.append({
+                    "url": url,
+                    "payload": payload
+                })
+        except requests.exceptions.RequestException as e:
+            print(colored(f"[SQL TEST] Error testing {url}: {e}", "red"))
     return sql_results
 
-# Discover all links within a website
-def discover_links(url):
-    links = []
-    try:
-        response = requests.get(url, timeout=10)
-        soup = BeautifulSoup(response.text, "html.parser")
-        for a_tag in soup.find_all("a", href=True):
-            href = a_tag["href"]
-            if href.startswith("http"):
-                links.append(href)
-            elif href.startswith("/"):
-                links.append(url.rstrip("/") + href)
-    except requests.exceptions.RequestException as e:
-        print(colored(f"[DISCOVER] Error discovering links on {url}: {e}", "red"))
-    return links
-
-# Scan websites
+# Scan websites for vulnerabilities
 def scan_websites(file_name):
     websites = load_websites(file_name)
     if not websites:
@@ -95,10 +76,6 @@ def scan_websites(file_name):
     for website in websites:
         print(colored(f"\n[+] Scanning: {website}", "cyan"))
 
-        # Discover all links on the website
-        links = discover_links(website)
-        all_urls = [website] + links
-
         # Prepare tables for results
         xss_table = PrettyTable()
         xss_table.field_names = ["URL", "Payload"]
@@ -106,20 +83,17 @@ def scan_websites(file_name):
         sql_table = PrettyTable()
         sql_table.field_names = ["URL", "Payload"]
 
-        for url in all_urls:
-            print(colored(f"Scanning URL: {url}", "light_blue"))
+        # Check for XSS vulnerabilities
+        xss_results = test_xss(website)
+        if xss_results:
+            for result in xss_results:
+                xss_table.add_row([result['url'], result['payload']])
 
-            # Test for XSS vulnerabilities
-            xss_results = test_xss(url)
-            if xss_results:
-                for result in xss_results:
-                    xss_table.add_row([result['url'], result['payload']])
-
-            # Test for SQL Injection vulnerabilities
-            sql_results = test_sql(url)
-            if sql_results:
-                for result in sql_results:
-                    sql_table.add_row([result['url'], result['payload']])
+        # Check for SQL Injection vulnerabilities
+        sql_results = test_sql(website)
+        if sql_results:
+            for result in sql_results:
+                sql_table.add_row([result['url'], result['payload']])
 
         # Display results
         if xss_table.rowcount > 0:
